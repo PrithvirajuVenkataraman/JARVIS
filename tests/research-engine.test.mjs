@@ -41,6 +41,8 @@ import { clearExtractorCaches, crawlArticleResilient, extractArticleFromHtml, is
 import { normalizeCrawl4AiResult } from '../api/_lib/crawl4ai-client.js';
 import { isPublicWebUrl } from '../api/_lib/public-web-url.js';
 import { callResearchModel, researchModelProviders, clearResearchModelHealth } from '../api/_lib/research-model.js';
+import { extractQueryDateIntent, parseDocumentDate, computeTemporalScore, hybridRerank } from '../api/_lib/hybrid-reranker.js';
+import { rankSources } from '../api/search.js';
 import {
     buildPublisherRecoveryQuery,
     isMatchingPublisherArticle,
@@ -768,19 +770,19 @@ const response = (provider, data = body) => Response.json(provider === 'groq'
 // Groq-specific failure contracts explicitly select Groq; Automatic is tested below.
 const invoke = extra => callResearchModel({ ...keys, selectedModel: 'openai/gpt-oss-120b', system: 'Return supported facts.', prompt: 'A question and evidence.', json: true, timeoutMs: 1000, ...extra });
 
-test('Automatic research uses Hydrogen first and recovers through Groq within its attempt budget', async () => {
+test('Automatic research uses GPT-OSS 120B first and recovers through Gemini within its attempt budget', async () => {
     clearResearchModelHealth(); const original = globalThis.fetch; const calls = [];
     globalThis.fetch = async (url, init) => {
         calls.push({ url: String(url), body: JSON.parse(init.body) });
-        return String(url).includes('googleapis.com') ? Response.json({}, { status: 503 }) : response('groq');
+        return String(url).includes('api.groq.com') ? Response.json({}, { status: 503 }) : response('gemini');
     };
     try {
         const providers = researchModelProviders({ ...keys, selectedModel: 'auto' });
-        assert.equal(providers[0].name, 'gemini'); assert.equal(providers[0].model, 'gemini-2.5-flash');
-        assert.equal(researchModelProviders({ ...keys, selectedModel: 'openai/gpt-oss-120b' })[0].name, 'groq');
+        assert.equal(providers[0].name, 'groq'); assert.equal(providers[0].model, 'openai/gpt-oss-120b');
+        assert.equal(researchModelProviders({ ...keys, selectedModel: 'gemini-2.5-flash' })[0].name, 'gemini');
         assert.deepEqual(await invoke({ selectedModel: 'auto', budget: { calls: 0, maxCalls: 2 } }), body);
-        assert.equal(calls.length, 2); assert.match(calls[0].url, /gemini-2\.5-flash/); assert.match(calls[1].url, /groq\.com/);
-        assert.equal(calls[0].body.generationConfig.thinkingConfig.thinkingBudget, 0); assert.equal(calls[0].body.tools, undefined);
+        assert.equal(calls.length, 2); assert.match(calls[0].url, /groq\.com/); assert.match(calls[1].url, /gemini-2\.5-flash/);
+        assert.equal(calls[0].body.tools, undefined);
     } finally { globalThis.fetch = original; clearResearchModelHealth(); }
 });
 
@@ -1473,13 +1475,16 @@ test('two real provider generations parse JSON, search a precise gap, and stop a
     globalThis.fetch = async (url, init) => {
         const request = JSON.parse(init.body);
         requests.push(request);
-        if (String(url).includes('googleapis.com')) return new Response('invalid request', { status: 400 });
-        const input = JSON.parse(request.messages.at(-1).content);
+        if (request.model === 'openai/gpt-oss-120b') return new Response('invalid request', { status: 400 });
+        const isGemini = String(url).includes('googleapis.com');
+        const input = JSON.parse(isGemini ? request.contents[0].parts[0].text : request.messages.at(-1).content);
         const usId = Number(input.sourceExcerpts.match(/\[(\d+)\] United States/)?.[1]);
         const caId = Number(input.sourceExcerpts.match(/\[(\d+)\] Canada/)?.[1]);
         const data = { facts: [fact('r1', us, usId, us)], gaps: [{ requirementId: 'r2', detail: 'Canada population census value', query: 'Canada population census' }] };
         if (caId) { data.facts.push(fact('r2', canada, caId, canada)); data.gaps = []; }
-        return Response.json({ choices: [{ message: { content: JSON.stringify(data) }, finish_reason: 'stop' }] });
+        return Response.json(isGemini
+            ? { candidates: [{ content: { parts: [{ text: JSON.stringify(data) }] }, finishReason: 'STOP' }] }
+            : { choices: [{ message: { content: JSON.stringify(data) }, finish_reason: 'stop' }] });
     };
     try {
         const result = await runResearch(question, { ...keys, timeoutMs: 45000 }, {
@@ -1640,6 +1645,61 @@ test('N-way comparisons, compound tokenizer, contextual substitution, and recent
     assert.equal(ceoWhoReqs[0].type, 'names', 'Role-holder ask must keep type "names"');
     const lowerWhoPlan = deterministicResearchPlan('who is virat kohli', []);
     assert.ok(lowerWhoPlan.queries.some(q => /latest news recent updates/i.test(q)));
+});
+
+test('Temporal reranking prevents stale 2014/2024 articles from outranking fresh 2026 articles', async () => {
+    const fixedNow = Date.parse('2026-06-15T00:00:00Z');
+    const inferredOlderYearMs = parseDocumentDate({
+        url: 'https://news.example/2014/05/12/profile',
+        title: 'Profile Archive 2014',
+        snippet: 'Published May 12 covering composer award milestones from 2014.'
+    }, fixedNow);
+    assert.ok(inferredOlderYearMs && new Date(inferredOlderYearMs).getUTCFullYear() === 2014, 'Undated Month-Day snippet on a 2014 page must infer 2014 instead of current year');
+
+    const undatedCurrentScore = computeTemporalScore(null, extractQueryDateIntent('latest news on Yuvan Shankar Raja'), fixedNow);
+    assert.ok(undatedCurrentScore < 0.5, 'Undated articles must score lower than fresh dated sources for current queries');
+
+    const docs = [
+        {
+            url: 'https://archive.example/2014/04/yuvan-awards',
+            title: 'Yuvan Shankar Raja awards 2014',
+            snippet: 'In 2014 he won Cyprus International Film Festival Award and Oy award.',
+            domain: 'archive.example',
+            relevance: 0.92
+        },
+        {
+            url: 'https://entertainment.example/2024/05/star-release',
+            title: 'Star film music updates May 10, 2024',
+            snippet: 'His upcoming project Star is set to release on May 10, 2024.',
+            domain: 'entertainment.example',
+            relevance: 0.90
+        },
+        {
+            url: 'https://live.example/2026/06/yuvan-latest',
+            title: 'Yuvan Shankar Raja 2026 concerts and upcoming albums',
+            snippet: 'Published June 10, 2026: Yuvan Shankar Raja announced his 2026 world tour and latest album.',
+            publishedDate: '2026-06-10',
+            domain: 'live.example',
+            relevance: 0.85
+        }
+    ];
+
+    const reranked = await hybridRerank('Yuvan Shankar Raja latest news and career overview', docs, { topK: 3, now: fixedNow });
+    assert.equal(reranked[0].url, 'https://live.example/2026/06/yuvan-latest', 'hybridRerank must rank fresh 2026 reporting above 2014/2024 pages');
+
+    const sourcesRanked = rankSources('Yuvan Shankar Raja latest updates', docs.map((d) => ({ ...d })), { referenceDate: new Date(fixedNow) });
+    assert.equal(sourcesRanked[0].url, 'https://live.example/2026/06/yuvan-latest', 'rankSources must prioritize fresh 2026 sources over 2014/2024 sources');
+
+    const evidenceRanked = rankResearchEvidence(
+        { query: 'Yuvan Shankar Raja latest updates', facets: ['Yuvan Shankar Raja', 'latest updates'] },
+        [
+            { url: 'https://old.example/2014/raam', title: 'Yuvan Shankar Raja 2014 Awards', snippet: 'Yuvan Shankar Raja latest updates archive May 2014.', domain: 'old.example', publisherDomain: 'old.example', publishedDate: '2014-05-01', relevance: 0.95 },
+            { url: 'https://new.example/2026/tour', title: 'Yuvan Shankar Raja 2026 World Tour', snippet: 'Yuvan Shankar Raja latest updates June 2026 concert.', domain: 'new.example', publisherDomain: 'new.example', publishedDate: '2026-06-10', relevance: 0.82 }
+        ],
+        2,
+        { now: fixedNow }
+    );
+    assert.equal(evidenceRanked[0].url, 'https://new.example/2026/tour', 'rankResearchEvidence must penalize >540d stale pages when fresh <=180d evidence exists');
 });
 
 });

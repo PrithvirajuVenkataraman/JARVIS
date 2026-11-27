@@ -225,3 +225,10 @@ JARVIS enforces a single shared content-safety policy across **Normal LLM Chat**
 3. **Stage 3 — Immutable System Policy (`UNIFIED_SAFETY_POLICY_DIRECTIVE`)**: Injected into both normal chat and research synthesis prompts; protected by immutable invariants so neither Custom Instructions nor Self-Improving Memory can weaken safety boundaries.
 4. **Stage 4 — Post-Generation & Image-Tag Scrubbing (`inspectOutputSafety`, `inspectImagePromptSafety`)**: Strips unsafe `:::image[...]` tags and blocks severe accidental leakage before responses reach the client.
 
+
+---
+
+## 10. Settings FAQ & Client ONNX Model Integrity
+
+- **Settings FAQ Documentation**: The interactive **FAQ** section inside **Settings → About → FAQ** (`#settings-row-faq`, `#settings-view-faq` in `app/features/settings-runtime.js`) is documented in [`docs/faq.md`](./faq.md).
+- **Zero-Credential On-Device ONNX Workers**: Both **On-Device Semantic Memory** (`app/recall-worker.js`) and **On-Device Vision Fallback** (`app/vision-worker.js`) restrict fetches strictly to allowlisted HTTPS Hugging Face origins (`credentials: 'omit'`, `referrerPolicy: 'no-referrer'`), run locally inside browser Web Workers/CacheStorage without sending images or memories to third-party servers, and respect `vercel.json` CSP directives without enabling `unsafe-inline` or `unsafe-eval`.

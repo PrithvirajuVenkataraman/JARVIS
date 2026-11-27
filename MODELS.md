@@ -13,7 +13,7 @@ graph TD
     Query["User Prompt / Upload"] --> Classifier{"Single-Pass Intent Router"}
     
     Classifier -->|Text / Reasoning / Coding| GroqLPU["Groq LPU Engine"]
-    Classifier -->|Vision / Image / PDF OCR| GeminiPool["Google Gemini Vision Pool"]
+    Classifier -->|Vision / Image / PDF OCR| GeminiPool["Google Gemini / Groq Vision Pool"]
     Classifier -->|Voice Speech Input| WhisperSTT["Groq Whisper STT"]
     Classifier -->|Live Fact / Web Search| WebRAG["Deep Web RAG Engine"]
 
@@ -24,16 +24,16 @@ graph TD
         G4 --> GemFallback["Gemini 2.5 Flash (Cloud Fallback)"]
     end
 
-    subgraph GeminiPool["Gemini Multimodal Pool"]
-        M1["gemini-2.5-flash (Primary)"] --> M2["gemini-2.0-flash"]
-        M2 --> M3["qwen/qwen3.8-27b (Groq Vision)"]
-        M3 --> M4["gemini-1.5-flash"]
+    subgraph GeminiPool["Multimodal Vision Cascade + Local Fallback"]
+        M1["gemini-4-hydrogen / gemini-2.5-flash"] --> M2["qwen/qwen3.8-27b (Groq Vision)"]
+        M2 --> M3["Tesseract.js WASM (Local OCR)"]
+        M3 --> M4["Browser ONNX Vision Worker (Transformers.js)"]
     end
 
     subgraph WebRAG["Deep Web Grounding Engine"]
-        W1["DuckDuckGo HTML + Google News RSS"] --> W2["Parallel Article Body Scraper (2.5s)"]
-        W2 --> W3["Zero-Parametric Prompt Pinning"]
-        W3 --> W4["GPT OSS 120B / Gemini RAG Synthesis"]
+        W1["DuckDuckGo / SearXNG / Google News / Wiki"] --> W2["Chronological & Hybrid Reranker"]
+        W2 --> W3["openai/gpt-oss-120b -> qwen/qwen3.8-27b"]
+        W3 --> W4["Gemini 2.5 Flash Failover"]
     end
 ```
 
@@ -81,16 +81,26 @@ graph TD
 
 ---
 
-## 3. Real-Time Web RAG & Zero-Parametric Anti-Hallucination
+### In-Browser Offline & Quota Fallback Models (`@huggingface/transformers` + WASM)
 
-For live world queries (e.g. current politicians, election winners, breaking news, sports standings):
+| Model / Engine | Runtime | Purpose | Storage / Behavior |
+| :--- | :--- | :--- | :--- |
+| **`Xenova/all-MiniLM-L6-v2`** (`q8`) | Browser Web Worker (`app/recall-worker.js`) | **On-Device Semantic Memory**: Private semantic search over prior turns & attachments | Opt-in (~23 MB hashed download) |
+| **`Xenova/vit-gpt2-image-captioning`** (`q8`) | Browser Web Worker (`app/vision-worker.js`) | **On-Device Vision Captioning Fallback**: Scene description when cloud vision quotas exhaust | On-demand via Settings (`#local-vision-enabled`) |
+| **`Xenova/vit-base-patch16-224`** (`q8`) | Browser Web Worker (`app/vision-worker.js`) | **On-Device Image Classification**: Top-5 visual object classes when cloud vision fails | On-demand & cached locally in CacheStorage |
+| **`tesseract.js@5`** (`eng` traineddata) | Browser Web Worker (`app/attachments.js`) | **On-Device OCR Fallback**: Extracts text from images & scanned PDFs without server keys | Loaded dynamically when cloud OCR fails |
 
-1. **Pre-Training Knowledge Bypass**:
-   - The LLM's parametric memory (frozen at 2023–2024 training cutoffs) is explicitly deprecated for real-time questions.
-2. **Parallel Deep Webpage Scraper (<2.5s Timeout)**:
-   - Scrapes full HTML article body text (up to 2,500 characters) across top live URLs simultaneously.
-3. **Strict Direct Name Synthesis**:
-   - Mandates that the synthesized response state the current incumbent leader's specific name and title in **sentence 1**, eliminating generic constitutional definitions.
+---
+
+## 3. Real-Time Web RAG, Chronological Ranking & Research Synthesis
+
+1. **Research Synthesis Priority (`api/_lib/research-model.js`)**:
+   - Automatic live web search synthesis prioritizes Groq **`openai/gpt-oss-120b` → `qwen/qwen3.8-27b` → `openai/gpt-oss-20b`**, automatically failing over to **`gemini-2.5-flash`** / **`gemini-2.5-flash-lite`** if Groq limits are reached. Explicit `gemini-*` user selections honor Gemini first.
+2. **Chronological Date Inference & Decay (`api/_lib/hybrid-reranker.js`, `api/_lib/research-evidence.js`, `api/search.js`)**:
+   - Partial dates (`Month DD`) infer explicit years present in URLs/titles/snippets instead of defaulting to the current year, preventing 2014/legacy pages from masquerading as fresh updates.
+   - Exponential recency decay (`exp(-ageDays / 45)`) and staleness penalties (`>365d` / `>540d`) ensure current reporting outranks stale archives.
+3. **Deep Reasoning (`Think`) Allocation (`api/chat-groq.js`)**:
+   - When `#composer-think-btn` (`Think`) is enabled, requests preserve `forceReasoning: true` / `tier: 'deep'` through the centralized LLM router (`api/_lib/llm-router.js`) and allocate `thinkingBudget: 8192` on Gemini thinking calls.
 
 ---
 

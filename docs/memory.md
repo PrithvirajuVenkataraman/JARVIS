@@ -272,3 +272,11 @@ Alongside factual user memory (`jarvis_unified_memories_v1`), JARVIS runs a **Co
 6. **Per-Intent Model Bandit Telemetry (`recordModelOutcome` + `getModelBanditHint`)**:
    - Tracks local UCB1 satisfaction scores per intent × model to support adaptive routing insights.
 
+
+---
+
+## 12. MEMO-Inspired Reflection Memory Normalization (`normalizeReflectionMemory`)
+
+Inspired by **MEMO: Memory as a Model** (`arXiv:2605.15156v2`), JARVIS applies zero-GPU **Reflection QA normalization** (`normalizeReflectionMemory(text, contextTurns)` in `app/memory/memory-extractor.mjs`) before persisting memories:
+- **Self-Containment Rewriting**: Resolves ambiguous leading third-person pronouns (`He`, `She`, `They`, `It`) against recent user/assistant conversation turns so stored memories remain unambiguous out of context.
+- **Entity Surfacing & Privacy**: Extracts key named entities alongside the normalized memory statement while preserving strict DLP/credential filtering.

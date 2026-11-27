@@ -20,7 +20,7 @@ npm run preview
 
 The production frontend is emitted to `dist/`. Vercel builds this directory while retaining the existing `/api/*` functions and rewrites.
 
-See [GitHub upload and Vercel Hobby deployment](docs/github-and-vercel.md) for the exact files to commit, exclusions, and project settings. Commit `package-lock.json`; keep credentials and generated artifacts out of the repository.
+See [GitHub upload and Vercel Hobby deployment](docs/github-and-vercel.md) for the exact files to commit, exclusions, and project settings, and [FAQ section in Settings](docs/faq.md) for the Settings → About → FAQ reference. Commit `package-lock.json`; keep credentials and generated artifacts out of the repository.
 
 ## Quality checks
 
@@ -51,7 +51,9 @@ Release checks require a passing `check`, production build, browser suite, and r
 - `app/composer-controller.js`, `app/dialog-controller.js`: accessible request announcements, composition handling, focus containment, and restoration.
 - `app/workspace-durability.js`, `app/persistence-controller.js`: IndexedDB sessions, durable deletion tombstones, coalesced writes, and a 15-session localStorage hot cache.
 - `app/capabilities.js`: diagnostics-driven feature visibility. Unavailable features are hidden from normal flows.
-- `app/features/`: settings and camera code loaded on demand. Attachments, document parsers, and image generation are also loaded on demand.
+- `app/local-vision-engine.js`, `app/vision-worker.js`: on-demand browser ONNX vision fallback (`@huggingface/transformers` captioning + image classification) and Canvas diagnostics when cloud vision quotas exhaust.
+- `app/features/`: settings (including Compliance, BYOK, Workspace Backup, and FAQ sub-view) and camera code loaded on demand. Attachments, document parsers, and image generation are also loaded on demand.
+- `app/tool-dispatcher.js`, `app/agent-orchestrator.js`: agentic tool loop and DAG orchestration bridged to `/api/search` over MCP JSON-RPC 2.0 (`web_search`, `web_fetch`, `datetime_context`).
 - `app/code-runner.js`: isolated, explicitly requested JavaScript execution; code cannot access application storage.
 - `app/performance-metrics.js`: bounded local performance measurements without prompt, response, or credential collection.
 - `api/chat-groq.js`, `api/vision.js`, `api/search.js`: chat, image understanding, and research endpoints.
@@ -70,7 +72,7 @@ The interface uses stationary controls and immediate rendering, without decorati
 
 Chat, writing, translation, document/image questions, and research depend on configured providers and their quotas. There is no promise of unlimited inference. Deterministic context routing and local persistence do not require paid infrastructure.
 
-Automatic text chat and research prefer `gemini-4-hydrogen`, with Groq retained as a bounded fallback. Explicit supported model selections are respected. Older `GEMINI_MODEL` settings do not displace Hydrogen in Automatic text chat. Provider labels report the model that actually answered, including fallback responses. Google Search grounding requires the explicit `SEARCH_GEMINI_GROUNDING_FREE_ALLOWANCE=true` opt-in; public retrieval remains separate. A model upgrade does not by itself verify every factual claim.
+Automatic text chat prefers Gemini with Groq fallback, while automatic live web research synthesis prioritizes Groq `openai/gpt-oss-120b` → `qwen/qwen3.8-27b` → `openai/gpt-oss-20b` with Gemini failover. Semantic intent routing runs through the centralized backend LLM router (`api/_lib/llm-router.js`) with minimal deterministic fallback when keys are unavailable. Explicit supported model selections are respected. Older `GEMINI_MODEL` settings do not displace Hydrogen in Automatic text chat. Provider labels report the model that actually answered, including fallback responses. Google Search grounding requires the explicit `SEARCH_GEMINI_GROUNDING_FREE_ALLOWANCE=true` opt-in; public retrieval remains separate. A model upgrade does not by itself verify every factual claim.
 
 
 The idle workspace has a centered JARVIS title, a visible sidebar button at the top left, and a composer. The sidebar provides New chat, Search, Memory, Custom instructions, Settings, and saved conversations. Select `+` for composer tools, including image/document attachments and supported camera/OCR actions.
@@ -80,7 +82,7 @@ Interface text uses locally bundled Inter Variable with system fallbacks. Equati
 Generated conversational replies can use brief, context-aware humour and reasoned opinions. The same voice policy applies to fast and normal replies; it uses recent dialogue for references, respects formal/no-jokes custom instructions, and stays serious for sensitive or high-stakes topics. It adds no separate personality-classification request or fixed joke bank. Source excerpts and OCR retain their factual wording.
 
 
-Document parsing is bundled locally and loaded when needed. Image OCR/understanding still requires a configured vision provider. A dismissible first-visit permission introduction has one Enable permissions action; the browser controls the individual microphone, camera, and location approval prompts. Features remain usable independently when only some permissions are granted.
+Document parsing is bundled locally and loaded when needed. When cloud vision providers are unavailable or hit quota, image OCR falls back to client-side `tesseract.js` WASM and visual understanding falls back to on-demand browser ONNX models (`@huggingface/transformers` in `app/vision-worker.js`, toggleable under Settings). A dismissible first-visit permission introduction has one Enable permissions action; the browser controls the individual microphone, camera, and location approval prompts. Features remain usable independently when only some permissions are granted.
 
 Voice typing currently requests English (`en-US`). Browser recognition can use the browser's remote speech service; the recording fallback sends audio through `/api/stt` to Groq Whisper. Dictation stays in the composer for review and manual sending. Stop releases the microphone; cancel, a new capture, or an edit ignores obsolete transcription results. Audio requests use the same 4 MB JSON budget as other uploads. Browser simulations test control flow, not accent accuracy or real iPhone/Android microphone behaviour.
 

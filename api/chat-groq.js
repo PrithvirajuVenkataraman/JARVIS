@@ -4,6 +4,7 @@ import { personPhotoQuery } from '../app/person-photo-query.js';
 import { publicAnswer, createAnswerFilter } from './_lib/answer-visibility.js';
 import { normalizeUserInstructions, userPreferenceDirective, conversationalVoiceDirective, contextReferenceDirective, bindServerConversation, bindAnswerConversation } from './_lib/answer-preferences.js';
 import { answerEvidencePolicy, factualAnswer } from './_lib/factual-answer.js';
+import { routeWithLlm, isLlmRouterEnabled, isLlmRouterShadowEnabled, compareRouterVsLegacy } from './_lib/llm-router.js';
 import { withRequestLifecycle, fetchWithLifecycle as fetch, runWithSignal, currentRequestSignal, allowGenerationAttempts } from './_lib/request-lifecycle.js';
 export const config = { maxDuration: 60 };
 import { applyApiSecurity, unsealSecret } from './_lib/security.js';
@@ -1130,21 +1131,6 @@ async function handler(req, res) {
 
             preferences.webMode = preferences.webMode || String(req.body?.webMode || '').trim().toLowerCase();
             preferences.isWebForced = Boolean(preferences.isWebForced || req.body?.isWebForced || req.body?.webMode === 'force' || preferences.webMode === 'force');
-            const profileReply = await personProfileReply(sanitizedMessage, { intent, grounding, images, webMode: preferences.webMode, isWebForced: preferences.isWebForced });
-            if (profileReply) {
-                if (req.aborted || req.signal?.aborted || currentRequestSignal()?.aborted || res.destroyed || res.writableEnded) return;
-                const payload = { ...profileReply, requestId };
-                if (req.body?.stream === true) {
-                    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-                    res.setHeader('Cache-Control', 'no-cache, no-transform');
-                    res.setHeader('Connection', 'keep-alive');
-                    writeSse(res, 'meta', { requestId });
-                    writeSse(res, 'delta', { text: profileReply.response });
-                    writeSse(res, 'done', payload);
-                    return res.end();
-                }
-                return res.status(200).json(payload);
-            }
             const referenceMetadata = req.body?.contextReference;
             const reference = referenceMetadata?.status === 'missing' && (images?.length || grounding?.selectedText || grounding?.sourceAnswer) ? { status: 'resolved' } : referenceMetadata;
             const systemPrompt = buildServerSystemPrompt(preferences, intent) + contextReferenceDirective(reference);
@@ -1155,7 +1141,7 @@ async function handler(req, res) {
             const routingMessage = isAttachmentGrounding
                 ? String(grounding?.originalRequest || sanitizedMessage || 'Analyze the attached file(s).').trim()
                 : (clientRoutingProbe || effectiveMessage);
-            const contextBlock = buildCompactedContextBlock(context, {
+            let contextBlock = buildCompactedContextBlock(context, {
                 rollingSummary: req.body?.rollingSummary || null,
                 retrievedTurns: request.value.retrievedTurns || null,
                 query: routingMessage || effectiveMessage
@@ -1172,21 +1158,83 @@ async function handler(req, res) {
             }
             const hadForcedWebMode = req.body?.webMode === 'force' || req.body?.isWebForced === true || preferences?.webMode === 'force' || /^\/(?:search|live|web)\b/i.test(routingMessage);
             if (needsContextClarification && !hadForcedWebMode) { preferences.webMode = 'off'; preferences.isWebForced = false; }
+            const hasPreloadedHybridEvidence = Boolean(req.body?.hybridLiveGrounded) || (Array.isArray(req.body?.sources) && req.body.sources.length > 0);
+            const hasRequestImages = Array.isArray(images) && images.length > 0;
+            const isExplicitWebOffDirect = req.body?.webMode === 'off' && !hadForcedWebMode && !isAttachmentGrounding && !hasRequestImages && req.body?.useLlmRouter !== true;
+            const llmRoute = (!isInternalSummary && intent !== 'chat_title' && !hasPreloadedHybridEvidence && !isExplicitWebOffDirect && isLlmRouterEnabled({ useLlmRouter: req.body?.useLlmRouter }))
+                ? await routeWithLlm(routingMessage || sanitizedMessage, {
+                    context,
+                    attachments: grounding?.attachments,
+                    images,
+                    grounding,
+                    grounded: isAttachmentGrounding || hasRequestImages,
+                    webMode: preferences.webMode,
+                    isWebForced: hadForcedWebMode,
+                    isInternalSummary,
+                    intent,
+                    preferGemini: String(preferences?.selectedModel || '').toLowerCase().startsWith('gemini'),
+                    customGroqKey,
+                    customGeminiKey,
+                    signal: currentRequestSignal(),
+                    cacheScope: req.headers?.['x-session-id'] || ''
+                })
+                : null;
+            const skipStaticProfileForLiveLlm = Boolean(llmRoute?.source === 'llm_router' && (llmRoute.retrievalRequired || llmRoute.strategy === 'live_web' || llmRoute.strategy === 'hybrid_live_llm'));
+            const profileReply = skipStaticProfileForLiveLlm ? null : await personProfileReply(sanitizedMessage, { intent, grounding, images, webMode: preferences.webMode, isWebForced: preferences.isWebForced });
+            if (profileReply) {
+                if (req.aborted || req.signal?.aborted || currentRequestSignal()?.aborted || res.destroyed || res.writableEnded) return;
+                const payload = { ...profileReply, requestId };
+                if (req.body?.stream === true) {
+                    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+                    res.setHeader('Cache-Control', 'no-cache, no-transform');
+                    res.setHeader('Connection', 'keep-alive');
+                    writeSse(res, 'meta', { requestId });
+                    writeSse(res, 'delta', { text: profileReply.response });
+                    writeSse(res, 'done', payload);
+                    return res.end();
+                }
+                return res.status(200).json(payload);
+            }
             const prefersStreamGeneration = req.body?.stream === true &&
                 !isAttachmentGrounding &&
                 !hadForcedWebMode &&
+                llmRoute?.source !== 'llm_router' &&
                 (
                     isStreamPreferredGenerationRequest(clientRoutingProbe) ||
                     isStreamPreferredGenerationRequest(effectiveMessage)
                 );
-            const hasRequestImages = Array.isArray(images) && images.length > 0;
-            const routeDecision = (prefersStreamGeneration || (hasRequestImages && !hadForcedWebMode))
+            const legacyDecision = (prefersStreamGeneration || (hasRequestImages && !hadForcedWebMode))
                 ? { strategy: 'direct', reason: hasRequestImages ? 'multimodal_vision_direct' : 'stream_preferred_generation', webEligible: false }
                 : classifyRoutingDecision(routingMessage, '', {
                     intent,
                     isInternalSummary,
                     isAttachmentGrounding
                 });
+            let routeDecision = legacyDecision;
+            if (llmRoute?.source === 'llm_router') {
+                const userForcedDeep = req.body?.forceReasoning === true || req.body?.tier === 'deep' || intent === 'deep_reasoning';
+                const wantsLive = Boolean(llmRoute.retrievalRequired || ['live_web', 'hybrid_live_llm'].includes(llmRoute.strategy));
+                routeDecision = {
+                    strategy: wantsLive ? 'search' : 'direct',
+                    reason: llmRoute.intent || 'llm_semantic_router',
+                    webEligible: wantsLive,
+                    llmRoute,
+                    complexity: userForcedDeep ? 'deep' : llmRoute.complexity,
+                    answerScope: llmRoute.answerScope
+                };
+                if (isLlmRouterShadowEnabled()) {
+                    console.info(JSON.stringify({ tag: 'ROUTER_SHADOW', requestId, ...compareRouterVsLegacy(llmRoute, legacyDecision), latencyMs: llmRoute.latencyMs }));
+                }
+                if (Array.isArray(llmRoute.requiredTools) && llmRoute.requiredTools.includes('datetime_context')) {
+                    const tz = String(req.body?.timeZone || 'UTC').trim() || 'UTC';
+                    let formattedNow = new Date().toISOString();
+                    try {
+                        formattedNow = new Intl.DateTimeFormat('en-US', { dateStyle: 'full', timeStyle: 'long', timeZone: tz }).format(new Date());
+                    } catch (_) {}
+                    const dtNote = `[Tool Observation - datetime_context (${tz})]: ${formattedNow}`;
+                    contextBlock = contextBlock ? `${contextBlock}\n\n${dtNote}` : dtNote;
+                }
+            }
             if (needsContextClarification && !hadForcedWebMode) {
                 routeDecision.webEligible = false; routeDecision.strategy = 'direct'; routeDecision.reason = 'context_clarification';
             } else if (hadForcedWebMode) {
@@ -1198,7 +1246,6 @@ async function handler(req, res) {
                 routeDecision.strategy = 'direct';
                 routeDecision.reason = 'offline_forced_by_user';
             }
-            const hasPreloadedHybridEvidence = Boolean(req.body?.hybridLiveGrounded) || (Array.isArray(req.body?.sources) && req.body.sources.length > 0);
             const evidencePolicy = answerEvidencePolicy({
                 message: routingMessage,
                 intent,
@@ -1207,7 +1254,8 @@ async function handler(req, res) {
                 grounded: isAttachmentGrounding || Boolean(images?.length),
                 internal: isInternalSummary,
                 referenceStatus: reference?.status,
-                hybridLiveGrounded: hasPreloadedHybridEvidence
+                hybridLiveGrounded: hasPreloadedHybridEvidence,
+                precomputedRoute: llmRoute
             });
             if (evidencePolicy.hybrid) {
                 routeDecision.webEligible = true;
@@ -1224,6 +1272,7 @@ async function handler(req, res) {
                 const result = await factualAnswer(sanitizedMessage, {
                     context, preferences, customGroqKey, customGeminiKey,
                     unavailable: evidencePolicy.mode === 'evidence_unavailable',
+                    precomputedRoute: llmRoute,
                     onEvent: streaming ? (event, data) => {
                         if (event === 'status') writeSse(res, 'status', { state: 'SEARCHING', label: data.message });
                         if (event === 'entity') writeSse(res, 'entity', data);
@@ -1377,7 +1426,8 @@ async function handler(req, res) {
                 routingMessage,
                 effectiveMessage,
                 intent,
-                tier: req.body?.tier || preferences?.tier,
+                routeDecision,
+                tier: req.body?.tier || preferences?.tier || (llmRoute?.source === 'llm_router' ? llmRoute.complexity : undefined),
                 forceReasoning: req.body?.forceReasoning === true || preferences?.forceReasoning === true,
                 minimalThinking: req.body?.minimalThinking === true || preferences?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')) || scoreChatIntent(String(effectiveMessage || '').toLowerCase(), 'trivial_greeting') >= 0.28,
                 isAttachmentGrounding,
@@ -2128,7 +2178,8 @@ async function handler(req, res) {
                 routingMessage: options?.routingMessage || options?.userMessage || '',
                 userMessage: streamUserQuery,
                 webMode: options?.webMode,
-                tier: options?.tier,
+                routeDecision: options?.routeDecision,
+                tier: options?.tier || (options?.routeDecision?.llmRoute?.source === 'llm_router' ? options.routeDecision.llmRoute.complexity : undefined),
                 forceReasoning: options?.forceReasoning,
                 userSelectedModel: selectedModel,
                 minimalThinking: options?.minimalThinking === true || isMultipleChoiceQuestion(streamUserQuery) || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')) || scoreChatIntent(String(streamUserQuery || '').toLowerCase(), 'trivial_greeting') >= 0.28,
@@ -2920,7 +2971,10 @@ async function handler(req, res) {
         const routingQuery = (hasImages && (options?.routingMessage || options?.userMessage))
             ? String(options.routingMessage || options.userMessage)
             : effectiveMsg;
-        const queryComplexity = classifyQueryComplexity(routingQuery, { intent: options?.intent, tier: options?.tier, forceReasoning: options?.forceReasoning, hasImages });
+        const llmComplexityTier = options?.routeDecision?.llmRoute?.source === 'llm_router' ? options.routeDecision.llmRoute.complexity : '';
+        const queryComplexity = llmComplexityTier
+            ? { tier: llmComplexityTier, preferSpeed: llmComplexityTier === 'instant', reason: 'llm_semantic_router' }
+            : classifyQueryComplexity(routingQuery, { intent: options?.intent, tier: options?.tier, forceReasoning: options?.forceReasoning, hasImages });
         const routingTier = options?.tier || queryComplexity.tier;
         const speedPreferred = options?.preferSpeed !== undefined ? options.preferSpeed : queryComplexity.preferSpeed;
         const isReasoningQuery = isExplicitReasoningIntent(options?.intent, routingQuery);
@@ -3146,9 +3200,10 @@ async function handler(req, res) {
                         contents = formatted;
                     }
                 }
+                const isDeepRequested = options?.tier === 'deep' || options?.forceReasoning === true || options?.intent === 'deep_reasoning';
                 const isMathTarget = isMathematicalOrQuantitativeQuery(effectiveMsg, { hasImages: Boolean(images?.length) });
                 const isFineGrainedVision = hasImages && visionLane === 'fine_grained_id';
-                const shouldSuppressGeminiReasoning = !isMathTarget && !isFineGrainedVision && (
+                const shouldSuppressGeminiReasoning = !isDeepRequested && !isMathTarget && !isFineGrainedVision && (
                     hasImages ||
                     options?.minimalThinking === true ||
                     options?.preferSpeed === true ||
@@ -3170,7 +3225,7 @@ async function handler(req, res) {
                 }
                 if (shouldSuppressGeminiReasoning && supportsGeminiThinking(model)) {
                     geminiGenConfig.thinkingConfig = { thinkingBudget: 0 };
-                } else if (isMathTarget && supportsGeminiThinking(model)) {
+                } else if ((isMathTarget || isDeepRequested) && supportsGeminiThinking(model)) {
                     geminiGenConfig.thinkingConfig = { thinkingBudget: 8192 };
                 } else if (isFineGrainedVision && supportsGeminiThinking(model)) {
                     geminiGenConfig.thinkingConfig = { thinkingBudget: 1024 };
@@ -3316,7 +3371,10 @@ async function handler(req, res) {
         const routingQuery = (hasImages && (options?.routingMessage || options?.userMessage))
             ? String(options.routingMessage || options.userMessage)
             : effectiveMsg;
-        const queryComplexity = classifyQueryComplexity(routingQuery, { intent: options?.intent, tier: options?.tier, forceReasoning: options?.forceReasoning, hasImages });
+        const llmComplexityTier = options?.routeDecision?.llmRoute?.source === 'llm_router' ? options.routeDecision.llmRoute.complexity : '';
+        const queryComplexity = llmComplexityTier
+            ? { tier: llmComplexityTier, preferSpeed: llmComplexityTier === 'instant', reason: 'llm_semantic_router' }
+            : classifyQueryComplexity(routingQuery, { intent: options?.intent, tier: options?.tier, forceReasoning: options?.forceReasoning, hasImages });
         const routingTier = options?.tier || queryComplexity.tier;
         const speedPreferred = options?.preferSpeed !== undefined ? options.preferSpeed : (routingTier === 'instant' || queryComplexity.preferSpeed);
         const isReasoningQuery = isExplicitReasoningIntent(options?.intent, routingQuery);
@@ -4369,7 +4427,12 @@ async function handler(req, res) {
             return { escalate: false, reason: 'live_preloaded_first_pass' };
         }
         if (strategy === 'direct') {
-            if (reason.startsWith('static_') || reason === 'stable_factual_query' || reason === 'casual_or_non_factual') {
+            if (
+                reason.startsWith('static_')
+                || reason === 'stable_factual_query'
+                || reason === 'casual_or_non_factual'
+                || (routeDecision?.llmRoute?.source === 'llm_router' && !routeDecision?.llmRoute?.webDisabled)
+            ) {
                 return getUnknownGeneralKnowledgeEscalationDecision(firstAnswer);
             }
             if (strictMode) {
@@ -5811,7 +5874,7 @@ ${userPreferenceDirective(preferences)}`;
 
         const sections = [
             `You are JARVIS, a helpful text-first assistant.${userName ? ` The user is ${userName}.` : ''}`,
-            `Capabilities: Weather, Reminders, Shopping lists, Memory. Animated Visuals: embed one \`\`\`visual JSON block (type: flow|orbit|wave|sort|bars|projectile|steps).`,
+            `Capabilities: Weather, Reminders, Shopping lists, Memory. Only emit a \`\`\`visual JSON block (type: flow|orbit|wave|sort|bars|projectile|steps) with valid JSON when the user explicitly requests an interactive animation, diagram, or chart; never emit placeholder text like "JSON block".`,
             UNIFIED_SAFETY_POLICY_DIRECTIVE,
             `Style & Tone:\n- Peer voice; match user language (Kannada, Tamil, Telugu, Malayalam, Hindi, English, phonetic). Direct start; no meta-talk or filler. Avoid dashes.`,
             conversationalVoiceDirective(preferences),

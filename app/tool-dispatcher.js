@@ -306,15 +306,29 @@ export async function dispatchToolCall(name, args = {}, context = {}) {
         case 'web_search': {
             const query = parsedArgs?.query || parsedArgs?.raw || '';
             try {
-                const searchRes = await fetch('/api/search', {
+                const mcpRes = await fetch('/api/search', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query, limit: 8, answer: false, mode: 'rag' })
-                }).then(r => r.json()).catch(e => ({ success: false, error: String(e?.message || e) }));
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: `mcp_search_${Date.now()}`,
+                        method: 'tools/call',
+                        params: { name: 'web_search', arguments: { query, limit: Number(parsedArgs?.limit) || 8 } }
+                    })
+                }).then(r => r.json()).catch(e => ({ isError: true, error: String(e?.message || e) }));
+                const contentText = mcpRes?.result?.content?.[0]?.text || mcpRes?.content?.[0]?.text || '';
+                let parsedResults = mcpRes?.results || [];
+                if (!parsedResults.length && contentText) {
+                    try {
+                        const decoded = JSON.parse(contentText);
+                        if (Array.isArray(decoded)) parsedResults = decoded;
+                    } catch (_) {}
+                }
+                const isErr = Boolean(mcpRes?.isError || mcpRes?.result?.isError || mcpRes?.error);
                 return {
                     tool: 'web_search',
-                    success: Boolean(searchRes.success !== false),
-                    output: searchRes.results || []
+                    success: !isErr,
+                    output: parsedResults.length ? parsedResults : (contentText || mcpRes?.error || [])
                 };
             } catch (err) {
                 return { tool: 'web_search', success: false, output: String(err?.message || err) };
@@ -323,15 +337,22 @@ export async function dispatchToolCall(name, args = {}, context = {}) {
         case 'web_fetch': {
             const url = parsedArgs?.url || parsedArgs?.raw || '';
             try {
-                const fetchRes = await fetch('/api/search', {
+                const mcpRes = await fetch('/api/search', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'web_fetch', url })
-                }).then(r => r.json()).catch(e => ({ success: false, error: String(e?.message || e) }));
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: `mcp_fetch_${Date.now()}`,
+                        method: 'tools/call',
+                        params: { name: 'web_fetch', arguments: { url } }
+                    })
+                }).then(r => r.json()).catch(e => ({ isError: true, error: String(e?.message || e) }));
+                const contentText = mcpRes?.result?.content?.[0]?.text || mcpRes?.content?.[0]?.text || mcpRes?.content || mcpRes?.markdown || '';
+                const isErr = Boolean(mcpRes?.isError || mcpRes?.result?.isError || mcpRes?.error || !contentText);
                 return {
                     tool: 'web_fetch',
-                    success: Boolean(fetchRes.success),
-                    output: fetchRes.content || fetchRes.markdown || fetchRes.error || ''
+                    success: !isErr,
+                    output: contentText || mcpRes?.error || ''
                 };
             } catch (err) {
                 return { tool: 'web_fetch', success: false, output: String(err?.message || err) };
@@ -344,4 +365,17 @@ export async function dispatchToolCall(name, args = {}, context = {}) {
                 output: `Unknown tool: ${name}`
             };
     }
+}
+
+/**
+ * Executes a list of planned tool calls in parallel and returns structured results.
+ */
+export async function runAgenticToolLoop(toolCalls = [], context = {}) {
+    const calls = (Array.isArray(toolCalls) ? toolCalls : []).slice(0, 6);
+    if (!calls.length) return [];
+    return await Promise.all(calls.map(call => {
+        const name = String(call?.name || call?.function?.name || call?.tool || '').trim();
+        const args = call?.arguments ?? call?.args ?? call?.function?.arguments ?? {};
+        return dispatchToolCall(name, args, context);
+    }));
 }

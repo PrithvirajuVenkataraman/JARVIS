@@ -81,7 +81,7 @@ flowchart TD
 ### E. Hybrid BM25 & Semantic Neural Reranking (`api/_lib/hybrid-reranker.js` & `embeddings.js`)
 * **Lexical Scoring (BM25)**: Evaluates exact entity keyword frequency, inverse document frequency, and term saturation.
 * **Dense Semantic Embeddings**: When NVIDIA NeMo API keys are available, runs dense vector similarity matching (`rankTextsByEmbedding`, `rerankTexts`).
-* **Temporal Decay Weighting (`computeTemporalScore`)**: Recent publications receive positive weight adjustments for breaking queries, while penalizing outdated reports that contradict newer updates.
+* **Temporal Decay Weighting (`computeTemporalScore`, `parseDocumentDate`, `rankResearchEvidence`, `rankSources`)**: Partial dates (`Month DD`) infer explicit years present in source URLs/titles/snippets rather than defaulting to `currentYear`, preventing legacy 2014/2024 archives from outranking current articles. Exponential day-scale decay (`exp(-ageDays / 45)`) and staleness penalties (`>365d` / `>540d`) prioritize current reporting on breaking queries.
 * **Blended Score**: `FinalScore = (0.45 * BM25) + (0.40 * SemanticSimilarity) + (0.15 * TemporalFreshness) + DomainTrustDelta`.
 
 ### F. Domain Trust Registry & Scraper Suppression (`api/_lib/domain-trust-registry.js`)
@@ -113,7 +113,7 @@ JARVIS operates under a strict **Zero-Hardcoding Guarantee**:
 ## 4. Grounded Synthesis & Fail-Closed Guardrails
 
 1. **Constrained Prompting**:
-   The synthesis models (Groq GPT OSS 120B with failover to Google Gemini 2.5 Flash) receive strictly bounded, pre-ranked evidence blocks.
+   The synthesis pipeline (`api/_lib/research-model.js`) prioritizes Groq (`openai/gpt-oss-120b` → `qwen/qwen3.8-27b` → `openai/gpt-oss-20b`) with automatic failover to Google Gemini (`gemini-2.5-flash` / `gemini-2.5-flash-lite`) unless a Gemini model is explicitly selected. `/api/search` also exposes standard **MCP JSON-RPC 2.0** (`tools/list`, `tools/call`) for `web_search`, `web_fetch`, and `datetime_context`.
 2. **Clean Prose (No Raw In-Text Citations)**:
    The synthesis prompt forbids bracket citation tokens (e.g. `[1]`, `[2]`, `(Source 1)`). All facts are synthesized into fluent, natural language.
 3. **Clean Refusal on Insufficient Evidence**:

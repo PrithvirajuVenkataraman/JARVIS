@@ -387,3 +387,34 @@ function capitalizeWords(str) {
         .map(w => w.charAt(0).toUpperCase() + w.slice(1))
         .join(' ');
 }
+
+/**
+ * MEMO-inspired Reflection Memory Normalizer (Steps 3 & 4: Self-Containment + Entity Surfacing).
+ * Strips unresolved leading pronouns using recent context turns and extracts canonical entity tags
+ * so stored memories remain self-contained without needing the original chat thread.
+ */
+export function normalizeReflectionMemory(text, contextTurns = []) {
+    const raw = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return { text: '', entities: [], selfContained: false };
+    const safe = scanDlp(raw, { redactCredentials: true, maskPii: false }).sanitizedText;
+    const entityMatches = safe.match(/\b[A-Z][a-zA-Z0-9.-]{1,}(?:\s+[A-Z][a-zA-Z0-9.-]{1,}){0,2}\b/g) || [];
+    const contextText = (Array.isArray(contextTurns) ? contextTurns : [])
+        .slice(-4)
+        .map(t => String(t?.content || t?.text || t?.user || '').trim())
+        .filter(Boolean)
+        .join(' ');
+    const contextEntities = contextText.match(/\b[A-Z][a-zA-Z0-9.-]{1,}(?:\s+[A-Z][a-zA-Z0-9.-]{1,}){0,2}\b/g) || [];
+    let normalizedText = safe;
+    const leadingPronounMatch = safe.match(/^(It|They|He|She|This|That)\b\s+(.*)$/);
+    if (leadingPronounMatch && contextEntities.length > 0) {
+        const subject = contextEntities[contextEntities.length - 1];
+        normalizedText = `${subject} ${leadingPronounMatch[2]}`;
+    }
+    const entities = [...new Set([...entityMatches, ...contextEntities].map(e => e.trim()).filter(Boolean))].slice(0, 6);
+    const unresolvedPronoun = /^(?:It|They|He|She|This|That)\b/i.test(normalizedText);
+    return {
+        text: normalizedText,
+        entities,
+        selfContained: !unresolvedPronoun
+    };
+}

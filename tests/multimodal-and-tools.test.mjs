@@ -22,8 +22,10 @@ import {
     executeCodeInterpreter,
     executeDatetimeContext,
     executeSessionMemory,
-    dispatchToolCall
+    dispatchToolCall,
+    runAgenticToolLoop
 } from '../app/tool-dispatcher.js';
+import { normalizeReflectionMemory } from '../app/memory/memory-extractor.mjs';
 import chatHandler, { __test as chatTest } from '../api/chat-groq.js';
 import { classifyImageLocally } from '../api/_lib/local-vision-classifier.js';
 import {
@@ -79,7 +81,7 @@ import {
 } from '../app/agent-orchestrator.js';
 import { SelfImprovingMemoryEngine } from '../app/self-improving-memory.js';
 import { validateAndRepairCodeAndMath, StreamingSpeculativeGuard } from '../api/_lib/code-math-validator.js';
-import { __test as searchTest, parseGovernmentRoleQuery, rankSources, extractVerifiedLeadershipClaim } from '../api/search.js';
+import searchHandler, { __test as searchTest, MCP_TOOL_DEFINITIONS, parseGovernmentRoleQuery, rankSources, extractVerifiedLeadershipClaim } from '../api/search.js';
 import {
     extractQueryConstraints,
     detectLogicalContradictions,
@@ -3367,3 +3369,111 @@ console.log('================================================================\n'
 
 });
 
+
+test('MCP JSON-RPC 2.0, Agentic Tool Loop, and MEMO Reflection Normalization', async () => {
+    assert.ok(MCP_TOOL_DEFINITIONS.some((t) => t.name === 'datetime_context'), 'MCP_TOOL_DEFINITIONS must include datetime_context');
+
+    const rpcReq = (body) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    const makeRes = () => {
+        const res = { statusCode: 200, headers: {}, body: null };
+        res.setHeader = (k, v) => { res.headers[k.toLowerCase()] = v; };
+        res.status = (code) => { res.statusCode = code; return res; };
+        res.json = (data) => { res.body = data; return res; };
+        res.end = (data) => { if (data) res.body = data; return res; };
+        return res;
+    };
+
+    const listRes = makeRes();
+    await searchHandler(rpcReq({ jsonrpc: '2.0', id: 101, method: 'tools/list', params: {} }), listRes);
+    assert.equal(listRes.statusCode, 200);
+    assert.equal(listRes.body?.jsonrpc, '2.0');
+    assert.equal(listRes.body?.id, 101);
+    assert.ok(listRes.body?.result?.tools?.some((t) => t.name === 'datetime_context'), 'JSON-RPC tools/list must expose datetime_context');
+
+    const dtRes = makeRes();
+    await searchHandler(rpcReq({ jsonrpc: '2.0', id: 102, method: 'tools/call', params: { name: 'datetime_context', arguments: { timezone: 'UTC' } } }), dtRes);
+    assert.equal(dtRes.statusCode, 200);
+    assert.equal(dtRes.body?.jsonrpc, '2.0');
+    assert.equal(dtRes.body?.id, 102);
+    assert.equal(dtRes.body?.result?.isError, false);
+    assert.match(dtRes.body?.result?.content?.[0]?.text || '', /UTC/i);
+
+    const origFetch = globalThis.fetch;
+    try {
+        let seenRpcPayload = null;
+        globalThis.fetch = async (url, init) => {
+            seenRpcPayload = JSON.parse(init.body);
+            return new Response(JSON.stringify({
+                jsonrpc: '2.0',
+                id: seenRpcPayload.id,
+                result: { isError: false, content: [{ type: 'text', text: '1. Result — https://example.org' }] }
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        };
+        const looped = await runAgenticToolLoop([{ name: 'web_search', args: { query: 'OpenAI 2026' } }], {});
+        assert.equal(seenRpcPayload?.jsonrpc, '2.0');
+        assert.equal(seenRpcPayload?.method, 'tools/call');
+        assert.equal(seenRpcPayload?.params?.name, 'web_search');
+        assert.equal(looped.length, 1);
+        assert.equal(looped[0].success, true);
+        assert.match(String(looped[0].output || ''), /Result/);
+    } finally {
+        globalThis.fetch = origFetch;
+    }
+
+    const normalized = normalizeReflectionMemory(
+        'He composes film scores for Tamil cinema.',
+        [{ role: 'user', text: 'Tell me about Yuvan Shankar Raja' }]
+    );
+    assert.equal(normalized.selfContained, true);
+    assert.match(normalized.text, /Yuvan Shankar Raja/);
+    assert.ok(normalized.entities.includes('Yuvan Shankar Raja'));
+});
+
+test('On-Device ONNX Browser Vision Fallback combines caption, labels, and optional OCR', async () => {
+    const {
+        analyzeImageLocallyWithOnnx,
+        formatLocalVisionSummary,
+        isLocalVisionFallbackEnabled,
+        setLocalVisionFallbackEnabled
+    } = await import('../app/local-vision-engine.js');
+
+    assert.equal(isLocalVisionFallbackEnabled(), true, 'ONNX vision quota fallback should default enabled');
+    await setLocalVisionFallbackEnabled(false);
+    assert.equal(isLocalVisionFallbackEnabled(), false);
+    const disabledRes = await analyzeImageLocallyWithOnnx({ base64: 'iVBORw0KGgo=', mimeType: 'image/png' });
+    assert.equal(disabledRes.ok, false);
+    assert.equal(disabledRes.reason, 'disabled');
+    await setLocalVisionFallbackEnabled(true);
+
+    const mockRes = await analyzeImageLocallyWithOnnx(
+        { base64: 'iVBORw0KGgo=', mimeType: 'image/png' },
+        {
+            prompt: 'What is in this diagram?',
+            workerCall: async (op, payload) => {
+                assert.equal(op, 'analyze');
+                assert.ok(payload.imageDataUrl.startsWith('data:image/png;base64,'));
+                return {
+                    caption: 'a geometric triangle labeled A B C',
+                    labels: [{ label: 'diagram', score: 0.87 }, { label: 'chart', score: 0.42 }],
+                    models: ['Xenova/vit-gpt2-image-captioning', 'Xenova/vit-base-patch16-224']
+                };
+            },
+            extractOcrFn: async () => ({ ok: true, text: 'AB = 5 cm' })
+        }
+    );
+    assert.equal(mockRes.ok, true);
+    assert.equal(mockRes.provider, 'onnx_browser');
+    assert.match(mockRes.response, /geometric triangle/);
+    assert.match(mockRes.response, /diagram \(87%\)/);
+    assert.match(mockRes.response, /AB = 5 cm/);
+
+    const summaryOnly = formatLocalVisionSummary({ caption: 'red car', labels: [{ label: 'sports car', score: 0.91 }], dimensions: { width: 800, height: 600 } });
+    assert.match(summaryOnly, /800 × 600px/);
+
+    const visionWorkerCode = fs.readFileSync(path.resolve('app/vision-worker.js'), 'utf8');
+    const attachmentsCode = fs.readFileSync(path.resolve('app/attachments.js'), 'utf8');
+    const legacyCode = fs.readFileSync(path.resolve('app/legacy-runtime.js'), 'utf8');
+    assert.ok(visionWorkerCode.includes('@huggingface/transformers') && visionWorkerCode.includes('numThreads = 1'), 'Vision worker must configure single-thread ONNX WASM for mobile Safari compatibility');
+    assert.ok(attachmentsCode.includes('analyzeImageLocallyWithOnnx'), 'Attachment ingestion must cascade to browser ONNX vision when cloud OCR and Tesseract have no readable text');
+    assert.ok(legacyCode.includes('JarvisLocalVision?.analyzeImageLocallyWithOnnx'), 'Chat fallback must cascade to browser ONNX vision after /api/vision fails');
+});

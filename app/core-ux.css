@@ -104,6 +104,9 @@ body #input-bar-inner .composer-leading { gap:2px; }
 body #input-bar-inner #text-input { font-weight:400; }
 body #input-bar-inner.is-voice-active .composer-entry { display:none; }
 body #input-bar-inner :is(.composer-plus-btn,.composer-think-btn,.speech-input-btn,.composer-send-btn) { min-width:44px; min-height:44px; }
+body #input-bar-inner #composer-think-btn { position:relative; z-index:3; touch-action:manipulation; pointer-events:auto; }
+body #input-bar-inner #composer-think-btn.is-active,
+body #input-bar-inner #composer-think-btn[aria-pressed="true"] { background:rgba(168,85,247,0.24) !important; border:1px solid rgba(192,132,252,0.65) !important; border-radius:999px !important; color:#e9d5ff !important; }
 body #send-message-btn.composer-send-stop { animation:none; box-shadow:none; }
 @media(prefers-reduced-motion:reduce) { .has-web-search .composer-web-outline { animation:none; background:var(--web-search-accent); } }
 
@@ -143,13 +146,13 @@ body #help-modal .settings-row:has(.settings-switch) { flex-wrap:nowrap; }
     body #input-bar-inner .composer-think-label { display:none; }
     body #input-bar-inner :is(.composer-plus-btn,.composer-think-btn,.speech-input-btn,.composer-send-btn) { min-width:44px; min-height:44px; width:44px; height:44px; padding:0; margin:0; }
     .composer-web-search-active { font-size:13px; padding:0 3px; gap:4px; }
-    body #help-modal .help-modal-header { grid-template-columns:72px minmax(0,1fr) 72px; padding:12px 16px; }
+    body #help-modal .help-modal-header { grid-template-columns:44px minmax(0,1fr) 68px; padding:12px 14px; }
     body #help-modal .settings-back-label { display:none; }
     body #help-modal .help-modal-body { padding:16px; }
     body #help-modal .settings-row-left { flex-basis:auto; }
     body #help-modal .settings-row-right { margin-left:0; }
-    body #help-modal .settings-row:has(.settings-select), body #help-modal .settings-row:has(.settings-row-right > .settings-action-btn), body #help-modal .settings-row:has(.settings-row-right > .settings-danger-btn), body #help-modal .settings-permissions-row { grid-template-columns:minmax(0,1fr); }
-    body #help-modal .settings-row:has(.settings-select) .settings-row-right, body #help-modal .settings-row:has(.settings-row-right > .settings-action-btn) .settings-row-right, body #help-modal .settings-row:has(.settings-row-right > .settings-danger-btn) .settings-row-right { justify-self:stretch; justify-content:flex-start; padding-inline-start:46px; }
+    body #help-modal .settings-row:has(.settings-select), body #help-modal .settings-row:has(.settings-row-right > .settings-action-btn), body #help-modal .settings-row:has(.settings-row-right > .settings-danger-btn), body #help-modal .settings-row:has(.settings-export-buttons), body #help-modal .settings-permissions-row { grid-template-columns:minmax(0,1fr); }
+    body #help-modal .settings-row:has(.settings-select) .settings-row-right, body #help-modal .settings-row:has(.settings-row-right > .settings-action-btn) .settings-row-right, body #help-modal .settings-row:has(.settings-row-right > .settings-danger-btn) .settings-row-right, body #help-modal .settings-row:has(.settings-export-buttons) .settings-row-right { justify-self:stretch; justify-content:flex-start; padding-inline-start:44px; }
     body #help-modal .settings-select { width:100%; }
     body #help-modal .settings-permissions-row { align-items:flex-start; }
     body #help-modal .settings-permissions-row > button { justify-self:start; margin-inline-start:46px; max-width:calc(100% - 46px); }
@@ -157,6 +160,10 @@ body #help-modal .settings-row:has(.settings-switch) { flex-wrap:nowrap; }
 }
 
 /* Keep sidebar access visible while centering the title independently. */
+body #help-modal .compliance-badge { white-space:nowrap; flex-shrink:0; }
+@media(max-width:560px) {
+    body #help-modal :is(.compliance-policy-row, .compliance-diagnostics-header) { flex-direction:column; align-items:flex-start; gap:10px; }
+}
 body #app-header { display:grid; grid-template-columns:44px minmax(0,1fr) 44px; align-items:center; }
 body #app-header .header-brand-title { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 14px; color:var(--core-text); font:600 14px/1 var(--app-font-family); letter-spacing:.08em; }
 body #app-header #chat-sidebar-toggle { width:44px; height:44px; color:var(--core-text); border-radius:8px; }
@@ -232,7 +239,7 @@ body .assistant-message-text h4.assistant-md-heading { font-size:16px; }
 body .assistant-message-text .assistant-md-inline-code { font-size:.875em; line-height:inherit; }
 body .assistant-message-text :is(.assistant-md-blockquote,.assistant-md-quote) { margin:16px 0; padding:12px 16px; border-left:2px solid #686868; background:#151515; color:var(--core-muted); }
 body .assistant-message-text :is(th,td) { font-size:14px; line-height:1.55; vertical-align:top; }
-body #help-modal .settings-row-title { margin:0; font-size:14.5px; line-height:1.4; font-weight:600; letter-spacing:normal; color:var(--core-text); }
+body #help-modal .settings-row-title { margin:0; font-size:14.5px; line-height:1.4; font-weight:600; letter-spacing:normal; word-break:normal; overflow-wrap:break-word; color:var(--core-text); }
 body #help-modal .settings-modal-heading { font-size:18px; line-height:1.35; font-weight:600; white-space:normal; overflow:visible; text-overflow:clip; text-align:center; }
 body #help-modal :is(.settings-action-btn,.settings-chip-btn,.settings-preset-chip,.settings-ghost-btn) { min-height:var(--core-hit-area); border-radius:var(--core-radius); font-size:13px; font-weight:500; line-height:1.35; padding:8px 12px; background:var(--core-raised); border:1px solid var(--core-border); color:var(--core-text); white-space:nowrap; }
 body #help-modal .settings-danger-btn { min-height:var(--core-hit-area); border-radius:var(--core-radius); font-size:13px; font-weight:500; line-height:1.35; padding:8px 14px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.35); color:#f87171; display:inline-flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap; box-shadow:none; }

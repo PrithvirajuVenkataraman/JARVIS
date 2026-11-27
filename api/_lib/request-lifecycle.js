@@ -42,6 +42,21 @@ export function fetchWithLifecycle(input, init = {}) {
     return globalThis.fetch(input, { ...init, signal: composed });
 }
 
+export function fetchRouterWithLifecycle(input, init = {}) {
+    const scope = requestScope.getStore();
+    const signal = scope?.signal;
+    const composed = signal && init.signal ? AbortSignal.any([signal, init.signal]) : signal || init.signal;
+    if (composed?.aborted) return Promise.reject(composed.reason);
+    if (scope?.budget) {
+        const maxRouterAttempts = 2;
+        if ((scope.budget.routerAttempts || 0) >= maxRouterAttempts) {
+            return Promise.reject(Object.assign(new Error('The request exhausted its router-attempt budget.'), { code: 'router_budget_exhausted' }));
+        }
+        scope.budget.routerAttempts = (scope.budget.routerAttempts || 0) + 1;
+    }
+    return globalThis.fetch(input, { ...init, signal: composed });
+}
+
 export function createRequestLifecycle(req, res, timeoutMs = REQUEST_DEADLINE_MS) {
     const controller = new AbortController();
     const startedAt = Date.now();

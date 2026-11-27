@@ -245,6 +245,16 @@ export function createAgentOrchestrator(options = {}) {
                             let output = '';
                             if (typeof executorFn === 'function') {
                                 output = await executorFn(task, taskOutputs, currentDag.goal);
+                            } else if (globalThis?.JarvisToolDispatcher?.dispatchToolCall) {
+                                const toolName = task.role === AGENT_ROLES.RESEARCHER
+                                    ? 'web_search'
+                                    : task.role === AGENT_ROLES.CODER
+                                        ? 'session_memory'
+                                        : 'datetime_context';
+                                const toolRes = await globalThis.JarvisToolDispatcher.dispatchToolCall(toolName, { query: currentDag.goal });
+                                output = toolRes?.success
+                                    ? (typeof toolRes.output === 'string' ? toolRes.output : JSON.stringify(toolRes.output))
+                                    : `Agent ${task.role} completed step for: ${task.title}`;
                             } else {
                                 output = `Agent ${task.role} completed step for: ${task.title}`;
                             }

@@ -865,9 +865,16 @@ export function renderMarkdown(rawText = '', options = {}) {
             };
         }
         const isVisualBlock = /^(visual|animation|illustration)$/i.test(block.lang || '');
-        if (isVisualBlock && block.code.trim() && options?.streaming !== true) {
+        if (isVisualBlock) {
+            const trimmedVisual = String(block.code || '').trim();
+            if (!trimmedVisual || /^JSON\s+block\b/i.test(trimmedVisual)) return '';
+            if (options?.streaming === true) {
+                return /^\s*\{/.test(trimmedVisual)
+                    ? '<div class="assistant-md-p text-xs text-neutral-400">Preparing interactive visual...</div>'
+                    : '';
+            }
             const visualHtml = renderInteractiveVisualMarkup(block.code, blockId);
-            if (visualHtml) return visualHtml;
+            return visualHtml || '';
         }
         const langLabel = block.lang ? escapeHtml(block.lang.toUpperCase()) : 'CODE';
         const isPython = /^(python|py|python3)$/i.test(block.lang || '');

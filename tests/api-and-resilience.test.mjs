@@ -669,6 +669,32 @@ globalThis.fetch = async (url, init) => {
     if (href.includes('api.groq.com')) {
         const body = JSON.parse(String(init?.body || '{}'));
         const prompt = String(body?.messages?.[0]?.content || '');
+        if (prompt.includes("JARVIS's centralized semantic router")) {
+            return okJson({
+                choices: [{
+                    message: {
+                        content: JSON.stringify({
+                            intent: 'historical medical fact lookup',
+                            intents: ['historical lookup'],
+                            strategy: 'direct_chat',
+                            answerScope: 'narrow_fact',
+                            entities: [{ name: 'Aspirin', type: 'concept', roleOrContext: 'discovery history' }],
+                            requiredTools: ['knowledge_lookup'],
+                            retrievalRequired: false,
+                            freshness: 'historical',
+                            temporalWindow: 'none',
+                            verticalHint: 'medical',
+                            slots: {},
+                            documentScope: 'none',
+                            visionLane: 'none',
+                            complexity: 'standard',
+                            standaloneQuery: 'Who discovered aspirin?',
+                            searchQueries: []
+                        })
+                    }
+                }]
+            });
+        }
         if (prompt.includes('Classify the user message')) {
             return okJson({ choices: [{ message: { content: '{"blocked":false,"reason":"safe","safe_response":""}' } }] });
         }
@@ -706,6 +732,32 @@ globalThis.fetch = async (url, init) => {
     if (href.includes('api.groq.com')) {
         const body = JSON.parse(String(init?.body || '{}'));
         const prompt = String(body?.messages?.[0]?.content || '');
+        if (prompt.includes("JARVIS's centralized semantic router")) {
+            return okJson({
+                choices: [{
+                    message: {
+                        content: JSON.stringify({
+                            intent: 'historical medical fact lookup',
+                            intents: ['historical lookup'],
+                            strategy: 'direct_chat',
+                            answerScope: 'narrow_fact',
+                            entities: [{ name: 'Aspirin', type: 'concept', roleOrContext: 'discovery history' }],
+                            requiredTools: ['knowledge_lookup'],
+                            retrievalRequired: false,
+                            freshness: 'historical',
+                            temporalWindow: 'none',
+                            verticalHint: 'medical',
+                            slots: {},
+                            documentScope: 'none',
+                            visionLane: 'none',
+                            complexity: 'standard',
+                            standaloneQuery: 'Who discovered aspirin?',
+                            searchQueries: []
+                        })
+                    }
+                }]
+            });
+        }
         if (prompt.includes('Classify the user message')) {
             return okJson({ choices: [{ message: { content: '{"blocked":false,"reason":"safe","safe_response":""}' } }] });
         }
@@ -772,6 +824,32 @@ globalThis.fetch = async (url, init) => {
     if (href.includes('api.groq.com')) {
         const body = JSON.parse(String(init?.body || '{}'));
         const prompt = String(body?.messages?.[0]?.content || '');
+        if (prompt.includes("JARVIS's centralized semantic router")) {
+            return okJson({
+                choices: [{
+                    message: {
+                        content: JSON.stringify({
+                            intent: 'historical medical fact lookup',
+                            intents: ['historical lookup'],
+                            strategy: 'direct_chat',
+                            answerScope: 'narrow_fact',
+                            entities: [{ name: 'Aspirin', type: 'concept', roleOrContext: 'discovery history' }],
+                            requiredTools: ['knowledge_lookup'],
+                            retrievalRequired: false,
+                            freshness: 'historical',
+                            temporalWindow: 'none',
+                            verticalHint: 'medical',
+                            slots: {},
+                            documentScope: 'none',
+                            visionLane: 'none',
+                            complexity: 'standard',
+                            standaloneQuery: 'Who discovered aspirin?',
+                            searchQueries: []
+                        })
+                    }
+                }]
+            });
+        }
         if (prompt.includes('Classify the user message')) {
             return okJson({ choices: [{ message: { content: '{"blocked":false,"reason":"safe","safe_response":""}' } }] });
         }

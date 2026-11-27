@@ -172,21 +172,30 @@ export function evidenceText(source) {
     return base;
 }
 
-export function rankResearchEvidence(plan, sources, limit = 8) {
+export function rankResearchEvidence(plan, sources, limit = 8, options = {}) {
     const lexical = computeBM25Scores(plan.query, sources.map(s => ({ text: `${s.title} ${evidenceText(s)}` })));
     const max = Math.max(1, ...lexical);
+    const nowMs = Number.isFinite(options?.now) ? options.now : Date.now();
     const dateIntent = extractQueryDateIntent(plan.query);
     const dated = dateIntent.type !== 'neutral';
     const isPastQuery = dateIntent.type === 'historical' || /\b(1[0-8]\d{2}|19\d{2}|20(?:0\d|1\d|2[0-3]))\b/.test(plan.query);
     const comparisonEntities = comparisonParts(plan.query).entities;
+    const hasFreshCandidate = sources.some(s => {
+        const ts = parseDocumentDate(s, nowMs);
+        return Boolean(ts && (nowMs - ts) <= 180 * 86400000);
+    });
     const ranked = sources.map((s, i) => {
         const trust = classifyDomainTrustTier(s.domain, s.url);
-        const published = parseDocumentDate(s);
-        const recencyDecay = published ? Math.exp(-Math.max(0, Date.now() - published) / (45 * 86400000)) : 0;
-        const freshness = dated ? recencyDecay * 0.2 : (!isPastQuery ? recencyDecay * 0.12 : 0);
+        const published = parseDocumentDate(s, nowMs);
+        const ageDays = published ? Math.max(0, (nowMs - published) / 86400000) : null;
+        const recencyDecay = published ? Math.exp(-ageDays / 45) : 0;
+        const freshness = dated ? recencyDecay * 0.55 : (!isPastQuery ? recencyDecay * 0.32 : 0);
+        const stalenessPenalty = (!isPastQuery && hasFreshCandidate && ageDays !== null && ageDays > 540)
+            ? (dated ? -0.45 : -0.25)
+            : 0;
         const primary = s.qualitySignals?.includes('direct_primary_source') ? 0.9 : 0;
         const isRef = s.infobox || s.sourceType === 'encyclopedia' || /wikipedia\.org|britannica\.com|\.gov(?:\.|$)/i.test(s.url) ? 0.35 : 0;
-        return { ...s, __publishedMs: published || 0, retrievalScore: (lexical[i] || 0) / max + s.relevance + (s.pageFetched ? 0.4 : 0) + primary + isRef + trust.delta / 200 + freshness };
+        return { ...s, __publishedMs: published || 0, retrievalScore: (lexical[i] || 0) / max + s.relevance + (s.pageFetched ? 0.4 : 0) + primary + isRef + trust.delta / 200 + freshness + stalenessPenalty };
     }).sort((a, b) => b.retrievalScore - a.retrievalScore);
     const selected = [];
     const domains = new Map();
@@ -210,7 +219,7 @@ export function rankResearchEvidence(plan, sources, limit = 8) {
     for (const facet of plan.facets || []) add(ranked.find(s => !selected.some(sel => sel.url === s.url) && assessSourceRelevance(facet, s).relevant));
     // Ensure non-historical queries retain recent dated developments alongside static overviews.
     if (!isPastQuery && selected.length < limit) {
-        const recentCutoff = Date.now() - 120 * 86400000;
+        const recentCutoff = nowMs - 120 * 86400000;
         const recentPicks = ranked.filter(s => !selected.some(sel => sel.url === s.url) && (s.__publishedMs >= recentCutoff || s.sourceType === 'news' || s.sourceType === 'trusted_news'));
         for (const recentPick of recentPicks.slice(0, 2)) {
             if (selected.length < limit) add(recentPick);

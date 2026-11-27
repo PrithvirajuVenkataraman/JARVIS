@@ -4,6 +4,7 @@ export const config = { maxDuration: 60 };
 import { createHash } from 'node:crypto';
 import { applyApiSecurity, unsealSecret } from './_lib/security.js';
 import { classifyFreeLiveIntent, routeMessage } from './_lib/latest/router.js';
+import { routeWithLlm, isLlmRouterEnabled } from './_lib/llm-router.js';
 import { searchItems } from './_lib/latest/latest-cache.js';
 import { ingestLatestSources } from './_lib/latest/latest-ingest.js';
 import { runFreeLiveSearch, inferCategory, searchDuckDuckGoHtml, searchSearXNGJson, searchSearXNGRacer, searchYahooFinanceQuotes, fetchWikipediaInfobox, decodeGoogleNewsUrl, searchYahooNewsRss, searchBingNewsRss, searchWorldWireRss, searchTechSources, searchVehicleSources, searchGeopoliticsAndAffairs, searchHistoryAndReference, searchTransportAndItineraries, searchWeather } from './_lib/free-live/providers.js';
@@ -375,6 +376,19 @@ export const MCP_TOOL_DEFINITIONS = Object.freeze([
             },
             required: ['url']
         }
+    },
+    {
+        name: 'datetime_context',
+        description: 'Returns the exact current UTC and local timezone date/time for freshness validation and calendar calculations.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                timezone: {
+                    type: 'string',
+                    description: 'Optional IANA timezone name (e.g., "UTC", "Asia/Kolkata", "America/New_York").'
+                }
+            }
+        }
     }
 ]);
 
@@ -511,13 +525,27 @@ export async function searchResearchSources(query, options = {}) {
         for (const [index, candidate] of buildComparisonSearchQueries(query).entries()) {
             generalProviders.push([`duckduckgo_subject_${index + 1}`, (_, config) => searchDuckDuckGoHtml(candidate, config)], [`searxng_subject_${index + 1}`, (_, config) => searchSearXNGRacer(candidate, config)]);
         }
-        const verticalCategory = isTechnicalDocumentationQuery(options.originalQuery || query) ? 'general_live_web' : inferCategory(options.originalQuery || query);
+        const hint = options.precomputedRoute?.verticalHint || '';
+        const hintMap = {
+            technology: 'technology',
+            vehicles: 'vehicles',
+            history: 'history',
+            weather: 'weather',
+            finance: 'crypto',
+            sports: 'sports',
+            disasters: 'disasters',
+            places: 'tourism_food_places'
+        };
+        const verticalCategory = isTechnicalDocumentationQuery(options.originalQuery || query)
+            ? 'general_live_web'
+            : ((hint && hint !== 'general' && hintMap[hint]) ? hintMap[hint] : inferCategory(options.originalQuery || query));
+        const slotOptions = options.precomputedRoute?.slots ? { slots: options.precomputedRoute.slots } : {};
         if (verticalCategory === 'technology') generalProviders.push(['tech_vertical', searchTechSources]);
-        else if (verticalCategory === 'vehicles') generalProviders.push(['vehicles_vertical', searchVehicleSources]);
+        else if (verticalCategory === 'vehicles') generalProviders.push(['vehicles_vertical', (q, cfg) => searchVehicleSources(q, { ...cfg, ...slotOptions })]);
         else if (verticalCategory === 'conflicts_geopolitics') generalProviders.push(['affairs_vertical', searchGeopoliticsAndAffairs]);
         else if (verticalCategory === 'history') generalProviders.push(['history_vertical', searchHistoryAndReference]);
         else if (verticalCategory === 'transportation_itineraries') generalProviders.push(['itinerary_vertical', searchTransportAndItineraries]);
-        else if (verticalCategory === 'weather') generalProviders.push(['weather_vertical', async (q, cfg) => (await searchWeather(q, cfg))?.results || []]);
+        else if (verticalCategory === 'weather') generalProviders.push(['weather_vertical', async (q, cfg) => (await searchWeather(q, { ...cfg, ...slotOptions }))?.results || []]);
         await stage(generalProviders, query, Math.max(100, Math.floor(timeoutMs * 0.65)), 'general_search');
         const direct = relevant().filter(item => !isGoogleNewsWrapper(item.url) && !/wikipedia\.org|wikidata\.org/i.test(item.url));
         const docs = isTechnicalDocumentationQuery(options.originalQuery || query);
@@ -575,10 +603,26 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8, cus
         })
         .catch(() => null);
 
+    let precomputedRoute = req.body?.precomputedRoute || null;
+    const contextTurns = Array.isArray(req.body?.context) ? req.body.context : [];
+    if (!precomputedRoute && isLlmRouterEnabled() && (hasGeminiKey() || Boolean(getGroqApiKey()) || customGeminiKey || customGroqKey)) {
+        const routed = await routeWithLlm(rawQuery, {
+            context: contextTurns,
+            webMode: 'force',
+            isWebForced: true,
+            customGeminiKey,
+            customGroqKey,
+            signal: controller.signal,
+            timeoutMs: 1400,
+            cacheScope: req.headers?.['x-session-id'] || ''
+        }).catch(() => null);
+        if (routed?.source === 'llm_router') precomputedRoute = routed;
+    }
     try {
         await runWebResearch(rawQuery, {
             limit, customGeminiKey, customGroqKey,
-            context: Array.isArray(req.body?.context) ? req.body.context : [],
+            context: contextTurns,
+            precomputedRoute,
             timeZone: req.body?.timeZone,
             selectedModel: req.body?.selectedModel,
             preferences: req.body?.preferences,
@@ -710,22 +754,37 @@ async function handler(req, res) {
     ).trim();
     const customGroq = unsealSecret(rawGroq);
 
+    const isJsonRpc = req.body?.jsonrpc === '2.0' && Object.prototype.hasOwnProperty.call(req.body, 'id');
+    const mcpReply = (payload, status = 200) => res.status(status).json(
+        isJsonRpc ? { jsonrpc: '2.0', id: req.body.id, result: payload } : payload
+    );
+
     // MCP: tools/list discovery endpoint
     if (req.body?.method === 'tools/list' || req.body?.action === 'mcp_list_tools' || req.body?.type === 'tools/list') {
-        return res.status(200).json({
-            tools: MCP_TOOL_DEFINITIONS
-        });
+        return mcpReply({ tools: MCP_TOOL_DEFINITIONS });
     }
 
     // MCP: tools/call execution endpoint
     if (req.body?.method === 'tools/call' || req.body?.action === 'mcp_call_tool' || req.body?.type === 'tools/call') {
         const toolName = String(req.body?.params?.name || req.body?.name || '').trim();
         const args = req.body?.params?.arguments || req.body?.args || req.body?.arguments || {};
+        if (toolName === 'datetime_context') {
+            const now = new Date();
+            const tz = String(args.timezone || 'UTC').trim() || 'UTC';
+            let formatted = now.toISOString();
+            try {
+                formatted = new Intl.DateTimeFormat('en-US', { dateStyle: 'full', timeStyle: 'long', timeZone: tz }).format(now);
+            } catch (_) {}
+            return mcpReply({
+                content: [{ type: 'text', text: JSON.stringify({ formatted, iso: now.toISOString(), timezone: tz, year: now.getUTCFullYear() }) }],
+                isError: false
+            });
+        }
         if (toolName === 'web_search') {
             const q = String(args.query || args.q || '').trim();
             const safety = inspectInputSafety(q, { channel: 'search' });
             if (!safety.safe) {
-                return res.status(200).json({
+                return mcpReply({
                     content: [{ type: 'text', text: safety.refusalMessage }],
                     guardrailBlocked: true,
                     guardrailCategory: safety.category,
@@ -738,17 +797,12 @@ async function handler(req, res) {
             try {
                 const search = await runVerifiedWebSearch(dlpCheck.text, { limit: lim, customGeminiKey: customGemini, customGroqKey: customGroq });
                 const safeResults = filterSearchResultsSafety(search?.results || []);
-                return res.status(200).json({
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify(safeResults, null, 2)
-                        }
-                    ],
+                return mcpReply({
+                    content: [{ type: 'text', text: JSON.stringify(safeResults, null, 2) }],
                     isError: false
                 });
             } catch (err) {
-                return res.status(200).json({
+                return mcpReply({
                     content: [{ type: 'text', text: String(err?.message || err) }],
                     isError: true
                 });
@@ -757,7 +811,7 @@ async function handler(req, res) {
         if (toolName === 'web_fetch') {
             const fetchUrl = String(args.url || args.query || '').trim();
             if (isBlockedSafetyDomain(fetchUrl)) {
-                return res.status(200).json({
+                return mcpReply({
                     content: [{ type: 'text', text: 'I cannot fetch content from explicit adult, gore, or hate domains.' }],
                     guardrailBlocked: true,
                     isError: true
@@ -765,20 +819,15 @@ async function handler(req, res) {
             }
             const extracted = await crawlArticleBody(fetchUrl, { timeoutMs: 8000 }).catch(() => null);
             const textContent = extracted?.bodyText || '';
-            return res.status(200).json({
-                content: [
-                    {
-                        type: 'text',
-                        text: textContent
-                    }
-                ],
+            return mcpReply({
+                content: [{ type: 'text', text: textContent }],
                 isError: !textContent
             });
         }
-        return res.status(400).json({
+        return mcpReply({
             content: [{ type: 'text', text: `Unknown tool: ${toolName}` }],
             isError: true
-        });
+        }, 400);
     }
 
     // ChatGPT-Style Streaming RAG endpoint
@@ -917,9 +966,13 @@ async function handler(req, res) {
                 timing: { totalMs: search.research?.elapsedMs || 0 }
             });
         }
-        const classification = await classifyRetrievalDecision(originalQuery || query);
+        const classification = await classifyRetrievalDecision(originalQuery || query, {
+            context: contextTurns,
+            countTowardGenerationBudget: true
+        });
         const route = await resolveRetrievalRoute(originalQuery || query, classifyFreeLiveIntent(originalQuery || query), {
-            forceDecision: classification
+            forceDecision: classification,
+            precomputedRoute: classification.llmRoute || classification.route
         });
         if (mode === 'classify') {
             return res.status(200).json({
@@ -951,9 +1004,10 @@ async function handler(req, res) {
             });
         }
         if (route.route === 'live_required') {
+            const routerHint = classification.llmRoute || classification.route;
             if (route.category === 'government' || route.category === 'news' || route.category === 'web_search' || route.category === 'technical_documentation') {
                 const searchTarget = rewrite.dateContext ? `${query} ${rewrite.dateContext}` : query;
-                const search = await runVerifiedWebSearch(searchTarget, { limit });
+                const search = await runVerifiedWebSearch(searchTarget, { limit, precomputedRoute: routerHint });
                 return res.status(200).json({
                     success: true,
                     query,
@@ -968,7 +1022,7 @@ async function handler(req, res) {
                     answer: search.answer
                 });
             }
-            const search = await runFreeLiveSearch(query, route, { limit });
+            const search = await runFreeLiveSearch(query, route, { limit, precomputedRoute: routerHint });
             const unsupported = Boolean(search.unsupported);
             return res.status(200).json({
                 success: !unsupported,
@@ -1010,7 +1064,7 @@ async function handler(req, res) {
                 ...search
             });
         }
-        const search = await runVerifiedWebSearch(query, { limit });
+        const search = await runVerifiedWebSearch(query, { limit, precomputedRoute: classification.llmRoute || classification.route });
         return res.status(200).json({
             success: true,
             engineVersion: '2026.09.30-v2',
@@ -1136,67 +1190,53 @@ export async function classifyRetrievalDecision(query, options = {}) {
         };
     }
 
-    // 1. Fast deterministic intent pre-pass (<1ms)
+    if (options.precomputedRoute?.source === 'llm_router') {
+        const needsLive = Boolean(options.precomputedRoute.retrievalRequired || ['live_web', 'hybrid_live_llm'].includes(options.precomputedRoute.strategy));
+        return {
+            decision: needsLive ? 'needs_live_search' : 'stable_answer',
+            confidence: 0.95,
+            reason: options.precomputedRoute.intent || 'centralized_llm_router',
+            temporal: options.precomputedRoute.freshness !== 'none',
+            route: options.precomputedRoute,
+            llmRoute: options.precomputedRoute
+        };
+    }
+
     const normalized = normalizeSearchQuery(raw);
+    const hasKeys = hasGeminiKey() || Boolean(getGroqApiKey()) || Boolean(options.customGeminiKey) || Boolean(options.customGroqKey);
+    if (isLlmRouterEnabled(options) && options.forceDeterministic !== true && (hasKeys || typeof options.adapter === 'function')) {
+        const llmRoute = await routeWithLlm(raw, options).catch(() => null);
+        if (llmRoute?.source === 'llm_router') {
+            const needsLive = Boolean(llmRoute.retrievalRequired || ['live_web', 'hybrid_live_llm'].includes(llmRoute.strategy));
+            return {
+                decision: needsLive ? 'needs_live_search' : 'stable_answer',
+                confidence: 0.95,
+                reason: llmRoute.intent || 'centralized_llm_router',
+                temporal: llmRoute.freshness !== 'none',
+                route: llmRoute,
+                llmRoute
+            };
+        }
+        const deterministicAfterRouter = classifyDeterministicRetrievalIntent(normalized);
+        return deterministicAfterRouter || {
+            decision: isCurrentTopicSearchQuery(normalized) || isDatedChangingFactSearchQuery(normalized) ? 'needs_live_search' : 'stable_answer',
+            confidence: 0.85,
+            reason: llmRoute?.fallbackReason || 'minimal_router_fallback',
+            temporal: isCurrentTopicSearchQuery(normalized) || isDatedChangingFactSearchQuery(normalized),
+            llmRoute
+        };
+    }
+
+    // Offline / no-key / explicitly forced deterministic fallback
     const deterministic = classifyDeterministicRetrievalIntent(normalized);
     if (deterministic && options.forceModel !== true) {
         return deterministic;
     }
 
-    // 2. Model-assisted intent reasoning (Gemini / Groq with temperature 0)
-    if (hasGeminiKey() || Boolean(getGroqApiKey())) {
-        try {
-            const todayStr = new Date().toISOString().slice(0, 10);
-            const currentYear = new Date().getFullYear();
-            const prompt = `Return strict JSON only.
-Task: Decide whether the user's query needs LIVE WEB SEARCH or can be answered from STABLE MODEL KNOWLEDGE.
-Current Date: ${todayStr} (Year ${currentYear}).
-
-CRITICAL CLASSIFICATION PRINCIPLES:
-- DO NOT classify based on whether a topic is niche, foreign, regional, or unfamiliar (e.g. Serbian cultural concept "Inat", obscure geography, foreign language terms, or specialized scientific facts are stable model knowledge).
-- The key rule:
-  * STABLE FACT -> "stable_answer" (handled directly by LLM)
-  * TIME-SENSITIVE / CHANGING FACT -> "needs_live_search" (requires live web retrieval)
-
-ROUTE TO "needs_live_search" (temporal: true) when the correct answer may have changed over time or depends on the present date:
-1. Current / latest / today / now / recently / this week / new releases
-2. Current office holders, leaders, CEOs, chairmen, captains, coaches, CMs, PMs, presidents, governors, mayors
-3. Current prices, stock/crypto prices, exchange rates, weather, schedules, live sports scores, availability
-4. Recent events, breaking news, elections, results, updates, recent tournament winners ("who won the latest...")
-5. Current product/software versions, features, compatibility, pricing
-6. Recommendations or reviews where current/fresh information matters
-
-ROUTE TO "stable_answer" (temporal: false) for stable knowledge:
-1. Definitions, concepts, meanings (e.g. "What is Inat?", "What does Inat mean in Serbian culture?")
-2. Mathematics, logic, programming concepts, syntax, coding explanations
-3. Historical facts, established history (e.g. "Who was the first president of the US?", "Who wrote this poem?")
-4. Established scientific knowledge (e.g. "What is photosynthesis?")
-5. General educational questions, geography facts (e.g. "What is the capital of Serbia?")
-6. Translations, writing, rewriting, summarization, general explanations
-
-User question: ${JSON.stringify(raw)}
-JSON shape: {"decision":"needs_live_search"|"stable_answer","confidence":0.0,"reason":"short explanation","temporal":true|false}`;
-
-            const json = await callGeminiJson(prompt, { maxOutputTokens: 120, temperature: 0 });
-            const decision = String(json?.decision || '').trim();
-            if (['needs_live_search', 'stable_answer'].includes(decision)) {
-                return {
-                    decision,
-                    confidence: Math.max(0.01, Math.min(1.0, Number(json?.confidence) || 0.95)),
-                    reason: String(json?.reason || '').trim() || (decision === 'needs_live_search' ? 'Time-sensitive or changing factual intent.' : 'Stable model knowledge.'),
-                    temporal: Boolean(json?.temporal ?? (decision === 'needs_live_search'))
-                };
-            }
-        } catch (_) {
-            // Fallback to deterministic heuristic
-        }
-    }
-
-    // 3. Fallback evaluation
     return deterministic || {
         decision: isCurrentTopicSearchQuery(normalized) || isDatedChangingFactSearchQuery(normalized) ? 'needs_live_search' : 'stable_answer',
         confidence: 0.85,
-        reason: 'Evaluated via temporal changing fact heuristic.',
+        reason: 'Evaluated via offline deterministic fallback.',
         temporal: isCurrentTopicSearchQuery(normalized) || isDatedChangingFactSearchQuery(normalized)
     };
 }
@@ -2371,12 +2411,21 @@ export async function runVerifiedWebSearch(query, options = {}) {
     const planningQueries = [];
     let initialGroundedResults = [];
 
+    const routerQueries = options.precomputedRoute?.source === 'llm_router' && Array.isArray(options.precomputedRoute.searchQueries)
+        ? options.precomputedRoute.searchQueries.filter(Boolean)
+        : [];
+    if (routerQueries.length > 0) {
+        planningQueries.push(...routerQueries);
+    }
+
     if (options.retrievalOnly !== true && hasGeminiKey()) {
         const [planRes, groundRes] = await Promise.allSettled([
-            buildGeminiSearchPlan(normalizedQuery).catch(error => ({
-                queries: [],
-                warning: `gemini_query_planning_failed:${String(error?.code || error?.message || 'unknown')}`
-            })),
+            routerQueries.length > 0
+                ? Promise.resolve({ queries: routerQueries, warning: '' })
+                : buildGeminiSearchPlan(normalizedQuery).catch(error => ({
+                    queries: [],
+                    warning: `gemini_query_planning_failed:${String(error?.code || error?.message || 'unknown')}`
+                })),
             searchGeminiGrounding(normalizedQuery, { limit }).catch(() => null)
         ]);
         if (planRes.status === 'fulfilled' && planRes.value) {
@@ -5486,14 +5535,6 @@ export function rankSources(query, results, options = {}) {
         }
     }
 
-    const scored = list.map(item => {
-        const score = scoreSearchResult(item, terms, query);
-        // Write score back so downstream comparators (hybridRerank, post-rerank sort) can read item.score
-        item.score = score;
-        const publishedMs = item.publishedMs || parseDocumentDate(item) || 0;
-        return { item, score, publishedMs };
-    });
-
     const now = Date.now();
     const dateIntent = extractQueryDateIntent(query);
     const isHistorical = Boolean(
@@ -5508,6 +5549,23 @@ export function rankSources(query, results, options = {}) {
             /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|this\s+year|news|rate\s+cut|inflation|stocks?|markets?|ceasefire|war|election)\b/i.test(query)
         ))
     );
+
+    const scored = list.map(item => {
+        let score = scoreSearchResult(item, terms, query);
+        const publishedMs = item.publishedMs || parseDocumentDate(item, now) || 0;
+        if (!isHistorical && publishedMs > 0) {
+            const ageDays = Math.max(0, (now - publishedMs) / 86400000);
+            if (isChronological) {
+                if (ageDays <= 90) score += 14;
+                else if (ageDays > 365) score -= 22;
+            } else if (ageDays > 540 && item?.sourceType !== 'encyclopedia' && item?.sourceType !== 'structured_reference') {
+                score -= 10;
+            }
+        }
+        // Write score back so downstream comparators (hybridRerank, post-rerank sort) can read item.score
+        item.score = score;
+        return { item, score, publishedMs };
+    });
 
     if (isChronological) {
         if (dateIntent && dateIntent.type === 'target_month' && dateIntent.targetMonth !== undefined) {
@@ -5536,8 +5594,14 @@ export function rankSources(query, results, options = {}) {
                 const timeA = a.publishedMs || 0;
                 const timeB = b.publishedMs || 0;
                 if (timeA && timeB) {
+                    const ONE_YEAR_MS = 365 * 24 * 3600 * 1000;
+                    const ageA = Math.max(0, now - timeA);
+                    const ageB = Math.max(0, now - timeB);
+                    if ((ageA < NINETY_DAYS_MS && ageB > ONE_YEAR_MS) || (ageB < NINETY_DAYS_MS && ageA > ONE_YEAR_MS)) {
+                        return timeB - timeA;
+                    }
                     const scoreDiff = Math.abs(a.score - b.score);
-                    if (scoreDiff >= 10 || (a.score > 0 && b.score > 0 && (a.score >= b.score * 1.3 || b.score >= a.score * 1.3))) {
+                    if (scoreDiff >= 18 || (a.score > 0 && b.score > 0 && (a.score >= b.score * 1.6 || b.score >= a.score * 1.6))) {
                         return b.score - a.score;
                     }
                     if (timeA !== timeB) return timeB - timeA;

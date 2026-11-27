@@ -2,6 +2,7 @@ import { RAW_IMAGE_EXTENSIONS } from './image-decoder-core.js';
 import { decodeImageFile, cancelImageDecoding } from './image-decoder.js';
 import { formatBytes, detectImageMime, imageNameForMime } from './file-format.js';
 import { postJson as postApiJson } from './api-client.js';
+import { analyzeImageLocallyWithOnnx, isLocalVisionFallbackEnabled } from './local-vision-engine.js';
 import { jsonByteLength, MAX_JSON_REQUEST_BYTES, payloadSizeError } from './request-payload.js';
 import * as BM25Module from './bm25.js?v=2.0.5';
 import {
@@ -1341,6 +1342,13 @@ async function ingestViaVision(attachment) {
         if (tess.ok) {
             return tess;
         }
+        if (isLocalVisionFallbackEnabled() && typeof Worker !== 'undefined') {
+            notifyAttachmentProgress(attachment, 'Running on-device ONNX vision fallback...');
+            const onnx = await analyzeImageLocallyWithOnnx(attachment.file, { prompt: `Describe ${attachment.name || 'this image'}` }).catch(() => ({ ok: false }));
+            if (onnx?.ok && onnx?.response) {
+                return { ok: true, text: clipText(onnx.response), method: 'onnx_browser_vision', provider: 'onnx_browser' };
+            }
+        }
     }
 
     return {
@@ -2518,6 +2526,9 @@ async function extractTextViaTesseract(imageSource, onProgress) {
         console.warn('Tesseract client OCR fallback failed:', msg);
         return { ok: false, text: '', method: 'tesseract_client_ocr', error: msg, loadFailed };
     }
+}
+if (typeof globalThis !== 'undefined') {
+    globalThis.JarvisLocalVisionOcr = { extractText: extractTextViaTesseract };
 }
 function decodeXmlEntities(value) {
     return String(value || '')

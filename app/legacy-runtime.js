@@ -2898,25 +2898,10 @@ async function processUserQuery(text, options = {}) {
     const activeWebMode = typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'auto';
     const frontendRoute = decideFrontendRoute(t, {
         turnSource: options?.source || options?.turnSource || activeResponseRenderContext?.source || '',
-        webMode: activeWebMode
+        webMode: activeWebMode,
+        deferSemanticRoutingToBackend: true
     });
     logRoutingDebug('processUserQuery route_decision', t, { frontendRoute, activeWebMode });
-    if (frontendRoute.route === 'fast_simple') {
-        return await handleFastSimpleQuery(t, {
-            stream: options?.stream === true,
-            displayUserMessage: options?.displayUserMessage || t,
-            routeDecision: frontendRoute
-        });
-    }
-    if (activeWebMode === 'off') {
-        return await askGeminiAI(t, {
-            stream: options?.stream === true,
-            displayUserMessage: options?.displayUserMessage || t,
-            routeDecision: frontendRoute
-        });
-    }
-    // Only route to live search when user explicitly toggled it ON (webMode = 'force')
-    // The classifier may still tag queries as live_required, but we only honour it when forced
     if (activeWebMode === 'force' && frontendRoute.route === 'live_required' && isFactSearchEnabled()) {
         logRoutingDebug('processUserQuery -> authoritative live_required (user-forced)', t, { frontendRoute });
         const handled = await handleLiveRetrievalQuery(t, {
@@ -2925,14 +2910,12 @@ async function processUserQuery(text, options = {}) {
         });
         if (handled) return { intent: 'live_retrieval' };
     }
-    if (frontendRoute.route === 'chat_direct') {
-        logRoutingDebug('processUserQuery -> authoritative chat_direct', t, { frontendRoute });
-        return await askGeminiAI(t, {
-            stream: options?.stream === true,
-            displayUserMessage: options?.displayUserMessage || t,
-            routeDecision: frontendRoute
-        });
-    }
+    logRoutingDebug('processUserQuery -> backend LLM router', t, { frontendRoute });
+    return await askGeminiAI(t, {
+        stream: options?.stream === true,
+        displayUserMessage: options?.displayUserMessage || t,
+        routeDecision: frontendRoute
+    });
     if (isArtistSongRequest(t)) {
         logRoutingDebug('processUserQuery -> artist_song', t, { selectedHandler: 'handleArtistSongRequest' });
         await handleArtistSongRequest(t);
@@ -5911,6 +5894,31 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                     if (window.JarvisApi.isPayloadTooLarge(visionFallbackError)) return payloadFailure();
                     console.warn('[askGeminiAI] Cascade to /api/vision fallback also failed:', visionFallbackError?.message || visionFallbackError);
                 }
+                if (window.JarvisLocalVision?.isLocalVisionFallbackEnabled?.() && window.JarvisLocalVision?.analyzeImageLocallyWithOnnx) {
+                    try {
+                        const rawImagesOnnx = Array.isArray(requestPayload?.images) && requestPayload.images.length > 0 ? requestPayload.images : (Array.isArray(requestOptions?.grounding?.images) ? requestOptions.grounding.images : []);
+                        const primaryImgOnnx = rawImagesOnnx.find(img => img && (img.base64 || img.data || img.url || img.file));
+                        if (primaryImgOnnx) {
+                            const rawPromptOnnx = String(normalizedUserMessage || userMessage || '').trim();
+                            const onnxRes = await window.JarvisLocalVision.analyzeImageLocallyWithOnnx(primaryImgOnnx, {
+                                prompt: rawPromptOnnx,
+                                extractOcrFn: window.JarvisLocalVisionOcr?.extractText
+                            });
+                            if (onnxRes?.ok && onnxRes?.response) {
+                                if (targetMessageId) {
+                                    if (targetRow) { targetRow.__fallbackActive = true; targetRow.__fallbackCompleted = true; }
+                                    updateStreamingAssistantMessage(targetMessageId, onnxRes.response, {
+                                        userMessage: normalizedUserMessage,
+                                        streaming: false,
+                                        modelUsed: onnxRes.modelUsed || 'Browser ONNX Vision',
+                                        provider: 'onnx_browser'
+                                    });
+                                }
+                                return { success: true, response: onnxRes.response, text: onnxRes.response, assistantMessageId: targetMessageId, intent: 'local_onnx_vision_fallback', provider: 'onnx_browser' };
+                            }
+                        }
+                    } catch (_) {}
+                }
             }
 
             const isTimeout = error?.name === 'AbortError' || /timeout/i.test(String(error?.message || ''));
@@ -6395,6 +6403,13 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (typeof updateCapabilityPillsUi === 'function') {
                 updateCapabilityPillsUi();
             }
+            if (typeof updateComposerModeIndicatorUi === 'function') {
+                updateComposerModeIndicatorUi();
+            }
+        }
+        if (typeof window !== 'undefined') {
+            window.toggleDeepReasoningMode = toggleDeepReasoningMode;
+            window.isDeepReasoningActive = isDeepReasoningActive;
         }
 
         function getActiveCapabilityPill() {
@@ -6421,8 +6436,18 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
   if (!tray) { tray = document.createElement('div'); tray.id = 'composer-mode-chips'; tray.className = 'composer-mode-chips'; const bar = document.getElementById('input-bar-inner'); bar?.before(tray); }
   tray.replaceChildren();
   const web = typeof getWebSearchMode === 'function' && getWebSearchMode() === 'force';
+  const deep = typeof isDeepReasoningActive === 'function' && isDeepReasoningActive();
   const label = !web && _activeCapabilityPill === 'document_ocr' ? 'Document mode' : '';
   window.JarvisComposerTools?.syncSearchState();
+  if (deep) {
+    const thinkChip = document.createElement('button');
+    thinkChip.type = 'button';
+    thinkChip.className = 'composer-mode-chip composer-mode-chip-think';
+    thinkChip.textContent = 'Think ×';
+    thinkChip.setAttribute('aria-label', 'Turn off Think mode');
+    thinkChip.addEventListener('click', () => { toggleDeepReasoningMode(false); document.getElementById('text-input')?.focus(); });
+    tray.append(thinkChip);
+  }
   if (label) { const button = document.createElement('button'); button.type = 'button'; button.className = 'composer-mode-chip'; button.textContent = label + ' ×'; button.setAttribute('aria-label', 'Turn off ' + label); button.addEventListener('click', handleComposerModeBadgeClick); tray.append(button); }
  }
 
@@ -6599,8 +6624,9 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             const subViewByok = document.getElementById('settings-view-byok');
             const subViewArchInfo = document.getElementById('settings-view-architecture-info');
             const subViewDurability = document.getElementById('settings-view-workspace-durability');
+            const subViewFaq = document.getElementById('settings-view-faq');
             if (!mainView) return;
-            const allSubViews = [subViewCustom, subViewCompliance, subViewByok, subViewArchInfo, subViewDurability];
+            const allSubViews = [subViewCustom, subViewCompliance, subViewByok, subViewArchInfo, subViewDurability, subViewFaq];
             const hideAllSubViews = () => {
                 allSubViews.forEach(v => {
                     if (v) {
@@ -6673,6 +6699,16 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
                         renderWorkspaceDurabilityView();
                     }
                     const backBtn = subViewDurability.querySelector('.settings-subview-back-btn');
+                    if (backBtn) backBtn.focus();
+                }
+            } else if (viewName === 'faq') {
+                mainView.style.display = 'none';
+                mainView.classList.remove('active');
+                hideAllSubViews();
+                if (subViewFaq) {
+                    subViewFaq.style.display = 'flex';
+                    subViewFaq.classList.add('active');
+                    const backBtn = subViewFaq.querySelector('.settings-subview-back-btn');
                     if (backBtn) backBtn.focus();
                 }
             } else {
@@ -15041,10 +15077,6 @@ Answer the user directly and conversationally based on the quoted context.`;
             }
         }
 
-function getStableBrowserFactAnswer(text) {
-    return '';
-}
-
 function isExchangeRateQuery(text) {
     const t = String(text || '').toLowerCase();
     return /\b(exchange rate|currency|convert|conversion|usd|inr|eur|gbp|aed|cad|aud|jpy)\b/.test(t) &&
@@ -22190,99 +22222,6 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
     return handleBoundedLiveResearchQuery(userText, userText, options);
 }
 
-function isWordMeaningRequest(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return false;
-    // Word count check: dictionary lookup is strictly for short single-word/phrase queries (<= 6 words)
-    const wordCount = raw.split(/\s+/).length;
-    if (wordCount > 6) return false;
-    const t = raw.toLowerCase();
-    return /^(?:meaning of|define|definition of|what is the meaning of)\s+["']?[a-zA-Z-]{2,40}["']?[?.!]?$/i.test(t) ||
-           /^what does\s+["']?[a-zA-Z-]{2,40}["']?\s+mean[?.!]?$/i.test(t);
-}
-
-function extractWordForMeaning(text) {
-    const raw = String(text || '').trim();
-    const patterns = [
-        /\bmeaning of\s+["']?([a-zA-Z-]{2,40})["']?/i,
-        /\bdefinition of\s+["']?([a-zA-Z-]{2,40})["']?/i,
-        /\bdefine\s+["']?([a-zA-Z-]{2,40})["']?/i,
-        /\bwhat does\s+["']?([a-zA-Z-]{2,40})["']?\s+mean\b/i,
-        /\bwhat is the meaning of\s+["']?([a-zA-Z-]{2,40})["']?/i
-    ];
-    for (const p of patterns) {
-        const m = raw.match(p);
-        if (m?.[1]) return m[1].toLowerCase();
-    }
-    return '';
-}
-
-async function handleWordMeaningRequest(text) {
-    const word = extractWordForMeaning(text);
-    if (!word) return false;
-    showThinkingIndicator('Looking up meaning...');
-    try {
-        const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
-        if (!response.ok) throw new Error('dictionary_unavailable');
-        const data = await response.json();
-        const first = Array.isArray(data) ? data[0] : null;
-        const meaningObj = Array.isArray(first?.meanings) ? first.meanings[0] : null;
-        const defObj = Array.isArray(meaningObj?.definitions) ? meaningObj.definitions[0] : null;
-        const partOfSpeech = String(meaningObj?.partOfSpeech || '').trim();
-        const definition = String(defObj?.definition || '').trim();
-        let sentence = String(defObj?.example || '').trim();
-        if (!sentence && definition) {
-            sentence = `She used the word "${word}" correctly in a sentence.`;
-        }
-        if (!definition) throw new Error('empty_definition');
-        const msg = `Word: ${word}\n${partOfSpeech ? `Part of speech: ${partOfSpeech}\n` : ''}Meaning: ${definition}\nUsage: ${sentence}`;
-        addChatMessage(msg, false);
-        saveToHistory(text, msg);
-        return true;
-    } catch (_) {
-        const fallback = `I could not fetch the dictionary entry for "${word}" right now.`;
-        addChatMessage(fallback, false);
-        saveToHistory(text, fallback);
-        return true;
-    } finally {
-        hideThinkingIndicator();
-    }
-}
-
-async function handleDailyBriefRequest(text) {
-    showThinkingIndicator('Building your daily brief...');
-    try {
-        const parts = [];
-        const locationObj = window.userLocation || null;
-        if (locationObj?.city || locationObj?.state || locationObj?.country) {
-            const loc = [locationObj.city, locationObj.state, locationObj.country].filter(Boolean).join(', ');
-            parts.push(`Location: ${loc}`);
-        }
-        const weatherLine = document.getElementById('temperature')?.textContent?.trim();
-        if (weatherLine && !weatherLine.includes('--')) {
-            parts.push(`Weather: ${weatherLine}`);
-        }
-        const fuelHandled = await buildVerifiedSearchSummary('petrol price today near me', {
-            badge: 'Daily brief sources',
-            summary: ''
-        });
-        if (fuelHandled?.text) {
-            const fuelShort = String(fuelHandled.text || '').split('\n').slice(0, 2).join(' ');
-            parts.push(`Fuel: ${fuelShort}`);
-        }
-        const newsFallback = await buildNewsSearchFallback('latest headlines today', undefined);
-        if (newsFallback?.answer) {
-            parts.push(`Top news: ${newsFallback.answer}`);
-        }
-        const brief = `Daily brief\n\n${parts.join('\n\n') || 'No fresh data available right now.'}`;
-        addChatMessage(brief, false);
-        saveToHistory(text, brief);
-        return true;
-    } finally {
-        hideThinkingIndicator();
-    }
-}
-
 function exportChatHistoryJson() {
     try {
         const cleanHistory = sanitizeConversationHistoryRecords(conversationHistory);
@@ -22777,13 +22716,6 @@ function detectInputLanguageHint(text) {
             return `Yes ${getPreferredAddress()}, how can I help you with?`;
         }
 
-function isWakeGreetingText(text) {
-            const compact = String(text || '').trim();
-            if (!compact) return false;
-            return /^(?:(?:hey|hi|hello|ok|okay)\s+)?jarvis[.!?]*$/i.test(compact) ||
-                /^(hi|hello|hey|yo|sup|hola|vanakkam|namaste|good\s+(morning|afternoon|evening))[.!?]*$/i.test(compact);
-        }
-
         function handlePreferredAddressRequest(text) {
             const address = extractPreferredAddressRequest(text);
             if (!address) return false;
@@ -23042,35 +22974,16 @@ function isWakeGreetingText(text) {
                 turnSource: activeResponseRenderContext?.source || 'text',
                 contextResolution,
                 webMode: _activeWebMode,
-                explicitWeb: isWebForced
+                explicitWeb: isWebForced,
+                deferSemanticRoutingToBackend: true
             });
             logRoutingDebug('processCommand route_decision', text, { frontendRoute, contextResolution });
-            if (frontendRoute.route === 'live_required' || frontendRoute.requiresSources) {
-                window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { query: text, plannedRoute: 'live_required' } });
-                showThinkingIndicator('Thinking...');
-                logLatencyTrace('latency_floor_live', { route: frontendRoute.route });
-            } else if (frontendRoute.route === 'chat_direct') {
-                window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { query: text, plannedRoute: 'chat_direct' } });
-                showThinkingIndicator('Thinking...');
-                logLatencyTrace('latency_floor_direct', { route: frontendRoute.route });
-            } else if (frontendRoute.route === 'fast_simple' || frontendRoute.minimalThinking) {
-                // Keep the bubble minimal; stream starts immediately.
-                logLatencyTrace('latency_floor_fast', { route: frontendRoute.route });
-            }
-            if (frontendRoute.route === 'fast_simple' && !frontendRoute.requiresSources) {
-                logRoutingDebug('processCommand -> fast_simple', text, {
-                    selectedHandler: 'handleFastSimpleQuery',
-                    frontendRoute
-                });
-                await handleFastSimpleQuery(text, {
-                    stream: true,
-                    historyKey: rawCommandText,
-                    turnId: activeResponseRenderContext?.turnId || '',
-                    routeDecision: frontendRoute
-                });
-                return;
-            }
-            const lower = text.toLowerCase();
+            window.JarvisInteractionState?.transition?.('ANALYZING', {
+                metadata: { query: text, plannedRoute: (frontendRoute.route === 'live_required' || frontendRoute.requiresSources) ? 'live_required' : 'chat_direct' }
+            });
+            showThinkingIndicator('Thinking...');
+            logLatencyTrace((frontendRoute.route === 'live_required' || frontendRoute.requiresSources) ? 'latency_floor_live' : 'latency_floor_direct', { route: frontendRoute.route });
+
             const compact = String(text || '').trim();
             if (String(activeResponseRenderContext?.source || '').toLowerCase() === 'converse') {
                 setConverseUiState('responding', 'route_processing');
@@ -23080,83 +22993,22 @@ function isWakeGreetingText(text) {
                 return;
             }
 
-            if (isWakeGreetingText(compact)) {
-                const greet = buildWakeGreeting();
-                addChatMessage(greet, false);
-                saveToHistory(text, greet);
-                if (window.JarvisSpeechInput?.getState?.().converseEnabled === true) {
-                    speakConverseReply(greet);
-                }
-                return;
-            }
-
-            if (isWordMeaningRequest(compact)) {
-                const handledMeaning = await handleWordMeaningRequest(text);
-                if (handledMeaning) return;
-            }
-
             if (await handleUrlGroundedExtractionRequest(compact)) {
                 logRoutingDebug('processCommand -> crawl4ai_url_extract', compact, { selectedHandler: 'handleUrlGroundedExtractionRequest' });
                 return;
             }
 
-            if (/\b(daily brief|my brief|today brief|morning brief)\b/i.test(compact)) {
-                await handleDailyBriefRequest(text);
-                return;
-            }
-
-            if (/\b(export (chat|history|data)|download (chat|history))\b/i.test(compact)) {
+            if (/^(?:export (?:chat|history|data)|download (?:chat|history))$/i.test(compact)) {
                 showChatExportFormatPicker();
                 return;
             }
 
-            if (/\b(delete all data|wipe local data|clear all local data|reset app data)\b/i.test(compact)) {
+            if (/^(?:delete all data|wipe local data|clear all local data|reset app data)$/i.test(compact)) {
                 deleteAllLocalDataNow();
                 return;
             }
 
-            if (await handleOneShotTranslation(compact)) {
-                return;
-            }
-
-            if (/\b(open|start|launch|enable)\s+(camera|scan)\b|\b(scan|read)\s+(this|text|document)\b/i.test(lower)) {
-                addChatMessage('The camera scanner has been removed. Use Live Vision for camera-based questions.', false);
-                return;
-            }
-
-            // Deterministic routing for weather and scientific calculations.
-            if (isWeatherIntentText(compact)) {
-                logRoutingDebug('processCommand -> weather deterministic', compact, {
-                    selectedHandler: 'weather',
-                    location: extractLocationFromSentence(compact) || ''
-                });
-                const location = extractLocationFromSentence(compact);
-                const fullWeatherPrompt = text || compact;
-                if (location) {
-                    await getWeatherByCity(location, fullWeatherPrompt);
-                } else {
-                    await handleCurrentLocationWeatherRequest(fullWeatherPrompt);
-                }
-                return;
-            }
-            if (isAlgebraEquationRequest(compact)) {
-                logRoutingDebug('processCommand -> algebra equation', compact, {
-                    selectedHandler: 'handleAlgebraEquationRequest'
-                });
-                const handledAlgebra = await handleAlgebraEquationRequest(compact);
-                if (handledAlgebra) return;
-            }
-            if (isStepByStepMathRequest(compact)) {
-                logRoutingDebug('processCommand -> math step_by_step', compact, {
-                    selectedHandler: 'handleMathStepByStepRequest'
-                });
-                await handleMathStepByStepRequest(compact);
-                return;
-            }
-            if (isMathCalculationRequest(compact)) {
-                logRoutingDebug('processCommand -> math calculation', compact, {
-                    selectedHandler: 'handleMathCalculationRequest'
-                });
+            if (/^\s*[\d(][\d\s+\-*/%^().]*[+\-*/%^][\d\s+\-*/%^().]*=?\s*$/.test(compact) && isMathCalculationRequest(compact)) {
                 await handleMathCalculationRequest(compact);
                 return;
             }
@@ -23169,16 +23021,6 @@ function isWakeGreetingText(text) {
                 return;
             }
 
-            if (isCodeAnalyzerRequest(text)) {
-                await handleCodeAnalyzerRequest(text);
-                return;
-            }
-
-            if (await handleSplitwiseExpenseRequest(text)) {
-                return;
-            }
-
-            // Mark as visited (for analytics) safely
             try {
                 if (!localStorage.getItem('jarvis_has_visited')) {
                     localStorage.setItem('jarvis_has_visited', 'true');
@@ -23186,26 +23028,14 @@ function isWakeGreetingText(text) {
                 }
             } catch (_) {}
 
-            const isWeatherQuery = isWeatherIntentText(lower);
-
-            if (isCurrentLocationIntentText(lower)) {
-                await handleCurrentLocationRequest(text);
-                return;
-            }
-
-            if (!isWeatherQuery && !waitingForLocation) {
+            if (!waitingForLocation) {
                 const weatherCard = document.getElementById('weather-card');
                 if (weatherCard && !weatherCard.classList.contains('hidden')) {
                     weatherCard.classList.add('hidden');
                 }
-
             }
-            
-            const cleanText = String(text || '').trim();
 
-            const isSqlDataQuery = /\b(?:sql|database|postgres|mysql|sqlite|bigquery|snowflake)\b/i.test(cleanText) ||
-                (/\b(?:find|list|show|select|fetch|get|generate|write)\b.*\b(?:all|top|customers|orders|users|products|rows|items|sales|revenue|table|schema|records)\b/i.test(cleanText) &&
-                 /\b(?:where|over|greater|less|group by|order by|joined|total|sum|count|amount|days|date|status|showing|having)\b/i.test(cleanText));
+            const cleanText = String(text || '').trim();
 
             if (pendingScreenSuggestionRequest) {
                 const handledPendingScreen = await handlePendingScreenSuggestionReply(cleanText);
@@ -23215,26 +23045,6 @@ function isWakeGreetingText(text) {
             if (songMoodGameState) {
                 const handled = await handleSongMoodGameAnswer(cleanText);
                 if (handled) return;
-            }
-
-            if (_activeWebMode !== 'force') {
-                const stableFactAnswer = getStableBrowserFactAnswer(cleanText);
-                if (stableFactAnswer) {
-                    const assistantMessageId = addModelAssistantMessage(stableFactAnswer, 'Model answer');
-                    saveToHistory(text, stableFactAnswer);
-                    addFeedbackButtons(text, stableFactAnswer, assistantMessageId);
-                    return;
-                }
-
-                if (isStableHowExplainerQuery(cleanText) &&
-                    !requiresAutoFormula(cleanText) &&
-                    !isChemistryReactionQuery(cleanText)) {
-                    logRoutingDebug('processCommand -> fast_explainer', cleanText, {
-                        selectedHandler: 'handleFastExplainerQuery'
-                    });
-                    const handled = await handleFastExplainerQuery(cleanText, text);
-                    if (handled) return;
-                }
             }
 
             // Authoritative bounded live research / hybrid dispatch — only when live Web Search is not OFF

@@ -137,12 +137,38 @@ test('bare and vague person queries receive direct lookup guidance and append th
     const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
     process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
     const bio = 'Jordan Mercer is an entrepreneur and the co-founder and CEO of Northbridge, a global digital services company founded in 2008.';
+    const routeJson = JSON.stringify({
+        intent: 'person biography overview',
+        intents: ['person lookup'],
+        strategy: 'direct_chat',
+        answerScope: 'person_bio',
+        entities: [{ name: 'Jordan Mercer', type: 'person', roleOrContext: 'person lookup' }],
+        requiredTools: ['knowledge_lookup'],
+        retrievalRequired: false,
+        freshness: 'none',
+        temporalWindow: 'none',
+        verticalHint: 'general',
+        slots: { location: '', assetOrTicker: '', league: '', make: '', model: '' },
+        documentScope: 'none',
+        visionLane: 'none',
+        complexity: 'standard',
+        standaloneQuery: 'Who is Jordan Mercer',
+        searchQueries: [],
+        clarification: ''
+    });
     try {
         for (const stream of [false, true]) for (const selectedModel of ['openai/gpt-oss-120b', 'gemini-4-hydrogen']) {
             const bodies = [];
             globalThis.fetch = async (input, init = {}) => {
                 if (!/generativelanguage\.googleapis\.com|api\.groq\.com/.test(String(input))) return Response.json({});
-                const body = JSON.parse(init.body); bodies.push(body);
+                const body = JSON.parse(init.body);
+                const systemText = String(body?.messages?.[0]?.content || body?.system_instruction?.parts?.[0]?.text || '');
+                if (systemText.includes("JARVIS's centralized semantic router")) {
+                    return String(input).includes('generativelanguage')
+                        ? Response.json({ candidates: [{ content: { parts: [{ text: routeJson }] } }] })
+                        : Response.json({ choices: [{ message: { content: routeJson } }] });
+                }
+                bodies.push(body);
                 if (String(input).includes('generativelanguage')) return stream ? new Response(`data: {"candidates":[{"content":{"parts":[{"text":${JSON.stringify(bio)}}]},"finishReason":"STOP"}]}\n\n`, { headers: { 'content-type': 'text/event-stream' } }) : Response.json({ candidates: [{ content: { parts: [{ text: bio }] } }] });
                 return stream ? new Response(`data: {"choices":[{"delta":{"content":${JSON.stringify(bio)}},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }) : Response.json({ choices: [{ message: { content: bio } }] });
             };

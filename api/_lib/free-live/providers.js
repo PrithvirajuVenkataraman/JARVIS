@@ -1750,12 +1750,25 @@ export async function searchTransportAndItineraries(query, options = {}) {
 }
 
 export async function runFreeLiveSearch(query, route = {}, options = {}) {
-    const category = String(route?.category || '').trim() || inferCategory(query);
+    const pre = options.precomputedRoute || route?.precomputedRoute || null;
+    const hintToCategory = {
+        weather: 'weather',
+        finance: 'crypto',
+        sports: 'sports',
+        disasters: 'disasters',
+        vehicles: 'vehicles',
+        places: 'tourism_food_places',
+        technology: 'technology',
+        history: 'history'
+    };
+    const llmCategory = pre?.verticalHint && pre.verticalHint !== 'general' ? hintToCategory[pre.verticalHint] : '';
+    const category = llmCategory || String(route?.category || '').trim() || inferCategory(query);
+    const slots = options.slots || route?.slots || pre?.slots || {};
     const limit = clampInt(options.limit, 8, 1, 20);
-    if (category === 'weather') return searchWeather(query, { limit });
-    if (category === 'crypto') return searchCrypto(query, { limit });
+    if (category === 'weather') return searchWeather(query, { limit, slots });
+    if (category === 'crypto') return searchCrypto(query, { limit, slots });
     if (category === 'disasters') return searchDisasters(query, { limit });
-    if (category === 'sports') return searchSports(query, { limit });
+    if (category === 'sports') return searchSports(query, { limit, slots });
     if (category === 'transportation_itineraries') {
         const transportResults = await searchTransportAndItineraries(query, { limit, timeoutMs: options.timeoutMs, signal: options.signal });
         if (transportResults.length > 0) {
@@ -1763,7 +1776,7 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
         }
     }
     if (category === 'tourism_food_places') {
-        const placeRes = await searchTourismFoodPlaces(query, { limit });
+        const placeRes = await searchTourismFoodPlaces(query, { limit, slots });
         if (Array.isArray(placeRes?.results) && placeRes.results.length > 0) {
             return placeRes;
         }
@@ -1820,7 +1833,7 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
 }
 
 export async function searchWeather(query, options = {}) {
-    const location = extractLocation(query);
+    const location = String(options.slots?.location || '').trim() || extractLocation(query);
     if (!location) {
         return unsupportedFreeLive(query, 'weather', 'Weather needs a location. Ask with a city, for example "weather in Chennai".');
     }
@@ -1978,7 +1991,7 @@ export async function searchDisasters(query, options = {}) {
 }
 
 export async function searchSports(query, options = {}) {
-    const league = extractSportsLeague(query);
+    const league = String(options.slots?.league || '').trim() || extractSportsLeague(query);
     if (!league) {
         return unsupportedFreeLive(query, 'sports', 'Free sports coverage needs a league or sport name; live scores may be unavailable on permanent-free sources.');
     }

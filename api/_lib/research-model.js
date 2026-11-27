@@ -49,6 +49,7 @@ export function researchModelProviders(options = {}) {
         ? [...new Set([
             allowedGroq.includes(selected) ? selected : '',
             'openai/gpt-oss-120b',
+            'qwen/qwen3.8-27b',
             'openai/gpt-oss-20b'
         ].filter(Boolean))]
         : [];
@@ -62,7 +63,9 @@ export function researchModelProviders(options = {}) {
         const activeGemini = geminiModels.find(model => !isCoolingDown(modelHealthKey({ name: 'gemini', key: gemini, model })));
         if (activeGemini) providers.push({ name: 'gemini', key: gemini, model: activeGemini });
     }
-    if (!selected || selected === 'auto' || selected.startsWith('gemini-')) providers.reverse();
+    // Prefer Groq (openai/gpt-oss-120b -> qwen/qwen3.8-27b) by default for synthesis;
+    // reverse to Gemini only when explicitly selected by the user.
+    if (selected.startsWith('gemini-')) providers.reverse();
     return providers;
 }
 

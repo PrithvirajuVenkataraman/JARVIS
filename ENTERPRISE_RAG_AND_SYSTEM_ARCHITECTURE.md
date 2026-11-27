@@ -55,14 +55,13 @@ Our **Non-Parametric RAG Engine** dynamically fetches, verifies, and fuses live 
 
 ### 2.2 Latency Optimization: From 40–70s to 2.5s Cold / 0.1ms Warm
 
-| Stage | Historical Latency | Optimized Latency | Key Optimization Applied |
+| Stage | Legacy Flow | Centralized LLM-First Flow | Key Design |
 |---|---|---|---|
-| **Intent Classification** | ~1,200ms (LLM call) | **< 1ms** | In-process deterministic regex & keyword token parser |
-| **Search Query Planning** | ~1,800ms (LLM call) | **< 2ms** | Dynamic entity extraction + deterministic query builder |
-| **Evidence Fetching** | 15,000ms - 30,000ms | **2,400ms - 2,600ms** | Single concurrent `Promise.all` round across Google News RSS, DuckDuckGo, Wikipedia, and Wikidata SPARQL |
-| **Reranking** | 5,000ms - 10,000ms | **0.5ms** | In-process BM25 lexical scorer + Reciprocal Rank Fusion (RRF) |
-| **Structured Answer Early Exit**| N/A | **< 1ms** | Immediate return if structured claim extracted without waiting for LLM synthesis |
-| **Repeat Queries (Cache)** | 40,000ms | **0.1ms** | Dual-tier L1 in-memory + L2 distributed KV cache |
+| **Semantic Intent Routing** | Multiple redundant regex/prototype classifiers | Single centralized LLM call (`api/_lib/llm-router.js`) | Structured JSON routing contract + minimal deterministic fallback |
+| **Evidence Fetching** | Sequential scraping | Single concurrent `Promise.all` round | DuckDuckGo, SearXNG, Google News RSS, Wikipedia, Wikidata SPARQL, GDELT |
+| **Chronological Reranking** | Unbounded relevance only | **< 2ms** | In-process BM25 + RRF + year-inferred date decay (`exp(-ageDays/45)`) & staleness penalties |
+| **Research Synthesis** | Static fallback | **Groq primary -> Gemini failover** | Prioritizes `openai/gpt-oss-120b` -> `qwen/qwen3.8-27b` (`api/_lib/research-model.js`) |
+| **Offline Vision Fallback** | Metadata stub only | **Tesseract WASM + Browser ONNX Worker** | On-demand `@huggingface/transformers` caption/classification when quotas exhaust |
 
 ---
 

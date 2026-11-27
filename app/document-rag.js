@@ -198,7 +198,10 @@ export function chunkSectionsWithOverlap(sections = [], { chunkTokens = 700, ove
 
 const EXHAUSTIVE_INTENT_RE = /\b(summari[sz]e|overview|full\s+document|entire\s+(?:file|document|pdf|deck|report|contract)|every\s+(?:page|slide|section|clause|item|row)|all\s+(?:pages|slides|sections|chapters|tables|clauses|requirements)|compare|contrast|difference(?:s)?\s+between|across\s+(?:all|the)\s+(?:files|documents)|table\s+of\s+contents|outline|extract\s+all|complete\s+(?:review|analysis|breakdown))\b/i;
 
-export function classifyDocumentQueryMode(query = '') {
+export function classifyDocumentQueryMode(query = '', options = {}) {
+    const scope = String(options?.llmRoute?.documentScope || options?.documentScope || '').trim();
+    if (scope === 'exhaustive') return 'exhaustive';
+    if (scope === 'pinpoint' || scope === 'selective') return 'selective';
     const q = String(query || '').trim();
     if (!q) return 'exhaustive';
     if (EXHAUSTIVE_INTENT_RE.test(q)) return 'exhaustive';

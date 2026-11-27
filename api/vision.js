@@ -163,11 +163,14 @@ async function handler(req, res) {
         }
 
         const trimmedPrompt = String(prompt || '').trim();
-        const isMathOrProblemQuery = Boolean(trimmedPrompt) && (
-            /\b(?:solve|calculate|compute|evaluate|equation|quadratic|integral|derivative|hypotenuse|algebra|math|proof|simplify|factor)\b/i.test(trimmedPrompt) ||
-            /\b(?:what\s+is|what's|determine)\s+(?:the\s+)?(?:radius|diameter|area|perimeter|volume|length|angle|slope)\b/i.test(trimmedPrompt) ||
-            /\bfind\s+(?:the\s+)?(?:value|x|y|z|area|length|radius|angle|perimeter|volume|root|solution|distance|slope)\b/i.test(trimmedPrompt)
-        );
+        const routerVisionLane = String(req.body?.visionLane || '').trim();
+        const isMathOrProblemQuery = routerVisionLane
+            ? routerVisionLane === 'math_diagram'
+            : (Boolean(trimmedPrompt) && (
+                /\b(?:solve|calculate|compute|evaluate|equation|quadratic|integral|derivative|hypotenuse|algebra|math|proof|simplify|factor)\b/i.test(trimmedPrompt) ||
+                /\b(?:what\s+is|what's|determine)\s+(?:the\s+)?(?:radius|diameter|area|perimeter|volume|length|angle|slope)\b/i.test(trimmedPrompt) ||
+                /\bfind\s+(?:the\s+)?(?:value|x|y|z|area|length|radius|angle|perimeter|volume|root|solution|distance|slope)\b/i.test(trimmedPrompt)
+            ));
         const activeTask = (task === 'general_vision' && isMathOrProblemQuery) ? 'math_ocr_solve' : task;
 
         if (activeTask === 'math_ocr_solve') { allowGenerationAttempts(6);

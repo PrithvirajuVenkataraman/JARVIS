@@ -1360,6 +1360,18 @@ export function decideFrontendRoute(text, context = {}) {
         return res;
     }
 
+    if (context.deferSemanticRoutingToBackend === true) {
+        const res = {
+            ...base,
+            route: 'chat_direct',
+            reason: isWebOff ? 'web_off_direct_chat' : 'backend_llm_router',
+            requiresSources: false,
+            sourcePolicy: 'none'
+        };
+        FRONTEND_ROUTE_CACHE.set(cacheKey, res);
+        return res;
+    }
+
     const isPlace = context.placeGrounded || /\b(?:museum\s+near|hotels?\s+near|restaurants?\s+near|places\s+to\s+visit\s+in|directions\s+to|places\s+near\s+me|near\s+me|places\s+near)\b/i.test(raw);
     if (!isWebOff && isPlace) {
         const res = {

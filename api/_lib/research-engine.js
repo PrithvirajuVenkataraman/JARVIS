@@ -289,7 +289,7 @@ export async function runResearch(query, options = {}, dependencies = {}) {
         if (scope.signal.aborted || retrievalLeft() < 100 || searched.size >= RESEARCH_LIMITS.MAX_QUERIES || searched.has(candidate)) return;
         searched.add(candidate);
         try {
-            const config = { timeoutMs: Math.min(RESEARCH_LIMITS.PROVIDER_MS, retrievalLeft()), limit: 8, query: plan.query, requirements, onDiagnostic: diagnostic };
+            const config = { timeoutMs: Math.min(RESEARCH_LIMITS.PROVIDER_MS, retrievalLeft()), limit: 8, query: plan.query, requirements, precomputedRoute: options.precomputedRoute || null, onDiagnostic: diagnostic };
             const batch = await bounded(signal => dependencies.search(candidate, { ...config, signal }), Math.min(RESEARCH_LIMITS.PROVIDER_MS + 150, retrievalLeft()), scope.signal);
             if (!scope.signal.aborted) for (const item of batch || []) retain(item);
         } catch { warnings.add('provider_unavailable'); }
@@ -356,8 +356,23 @@ export async function runResearch(query, options = {}, dependencies = {}) {
     try {
         status('searching', 'Searching for the specific facts you asked for…');
         const isProductionRetrieval = !dependencies.search && !dependencies.generate && !dependencies.synthesize && !dependencies.extract;
+        const pre = options.precomputedRoute;
         if (dependencies.plan) {
             plan = await bounded(signal => dependencies.plan(query, context, { signal }), Math.min(500, timeLeft()), scope.signal).catch(() => plan);
+        } else if (pre?.source === 'llm_router') {
+            const resolvedPreQuery = clean(pre.standaloneQuery || plan.query) || plan.query;
+            plan = {
+                ...plan,
+                query: resolvedPreQuery,
+                answerScope: pre.answerScope || plan.answerScope,
+                verticalHint: pre.verticalHint || 'general',
+                slots: pre.slots || {},
+                temporalWindow: pre.temporalWindow || 'none',
+                queries: unique([...(Array.isArray(pre.searchQueries) ? pre.searchQueries : []), resolvedPreQuery, ...(plan.queries || [])]).slice(0, 6),
+                facets: unique([...(Array.isArray(pre.entities) ? pre.entities.map(e => e?.name).filter(Boolean) : []), ...(plan.facets || [])]).slice(0, 4),
+                ambiguous: pre.strategy === 'clarify' && !context.length,
+                clarification: pre.clarification || plan.clarification
+            };
         } else if (isProductionRetrieval && (context.length > 0 || query.length >= 3) && timeLeft() > 6000) {
             const planned = await bounded(signal => planResearch(query, context, {
                 signal,
@@ -375,7 +390,9 @@ export async function runResearch(query, options = {}, dependencies = {}) {
                 };
             }
         }
-        plan = resolveResearchAmbiguity(plan, query, context);
+        plan = pre?.source === 'llm_router' && pre.strategy !== 'clarify'
+            ? { ...plan, ambiguous: false }
+            : resolveResearchAmbiguity(plan, query, context);
         const enrichment = new AbortController();
         const enrichmentSignal = AbortSignal.any([scope.signal, enrichment.signal]);
         let completedVisuals = null;

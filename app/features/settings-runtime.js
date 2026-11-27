@@ -331,6 +331,28 @@ function showHelpModal() {
                                         </svg>
                                     </div>
                                 </button>
+
+                                <!-- FAQ & Help Row -->
+                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-faq" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('faq') })} aria-label="FAQ and Help">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <circle cx="12" cy="12" r="10"/>
+                                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                                                <line x1="12" y1="17" x2="12.01" y2="17"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">FAQ</h3>
+                                            <p class="settings-row-desc">Answers on web search, models, offline vision &amp; privacy.</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M9 18l6-6-6-6"/>
+                                        </svg>
+                                    </div>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -413,7 +435,7 @@ function showHelpModal() {
 
                         <!-- Sub-view Body -->
                         <div class="help-modal-body custom-scrollbar">
-                            <div class="flex items-center justify-between p-3 rounded-xl bg-white/[0.04] border border-white/10 mb-4">
+                            <div class="compliance-policy-row flex items-center justify-between gap-3 p-3 rounded-xl bg-white/[0.04] border border-white/10 mb-4">
                                 <div>
                                     <div class="text-xs font-semibold text-neutral-300">Policy Mode</div>
                                     <p class="text-[11px] text-neutral-400 mt-0.5">Governs how sensitive data and secrets are handled before leaving your browser.</p>
@@ -477,7 +499,7 @@ function showHelpModal() {
                                 </div>
 
                                 <div class="p-3">
-                                    <div class="flex items-center justify-between mb-2">
+                                    <div class="compliance-diagnostics-header flex items-center justify-between gap-3 mb-2">
                                         <div>
                                             <div class="text-xs font-semibold text-neutral-200">Local Diagnostics Log</div>
                                             <div class="text-[11px] text-neutral-400">Ring buffer of last 100 events (Diagnostics aid, not SOC2-grade evidence)</div>
@@ -840,6 +862,72 @@ function showHelpModal() {
                                 </button>
                                 <div id="backup-restore-status" class="text-[11px] text-neutral-300 mt-2"></div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-View 6: FAQ -->
+                    <div id="settings-view-faq" class="settings-view-panel settings-subview-panel" style="display:none;">
+                        <div class="help-modal-header">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('main') })} class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to Settings">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M19 12H5"></path>
+                                    <path d="M12 19l-7-7 7-7"></path>
+                                </svg>
+                                <span class="settings-back-label">Settings</span>
+                            </button>
+                            <div class="help-modal-title-block">
+                                <h2 class="settings-modal-heading">FAQ</h2>
+                            </div>
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeHelpModal() })} class="help-modal-ok-btn" aria-label="Close settings" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                                Done
+                            </button>
+                        </div>
+                        <div class="help-modal-body custom-scrollbar">
+                            <p class="settings-subview-desc">
+                                Frequently asked questions about models, live web search, offline ONNX vision fallback, memory, privacy, and usage limits.
+                            </p>
+
+                            <details class="settings-group-card mb-3" style="padding:14px;" open>
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">How does Live Web Search prioritize recent updates and avoid stale results?</summary>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
+                                    Live Web Search races public sources (DuckDuckGo, SearXNG, Google News RSS, Wikipedia, Wikidata, GDELT), applies chronological recency scoring with explicit year inference so old archives do not masquerade as current reporting, and synthesizes answers using Groq <code>openai/gpt-oss-120b</code> and <code>qwen/qwen3.8-27b</code> first with automatic Google Gemini failover.
+                                </p>
+                            </details>
+
+                            <details class="settings-group-card mb-3" style="padding:14px;">
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">What happens when cloud API or vision quotas run out?</summary>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
+                                    You can add your own API keys anytime under <strong>API Keys (BYOK)</strong>. For uploaded images and PDFs, JARVIS automatically cascades from cloud vision to client-side <strong>Tesseract.js WASM OCR</strong> for readable text and <strong>On-Device Vision Fallback (ONNX / Transformers.js)</strong> in a Web Worker for visual descriptions and object classes — without needing PyTorch or OpenCV on Vercel servers.
+                                </p>
+                            </details>
+
+                            <details class="settings-group-card mb-3" style="padding:14px;">
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">How does the Think button work on mobile and desktop?</summary>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
+                                    Tapping the brain icon in the composer enables Deep Reasoning mode (shown as a dismissible <code>Think ×</code> chip above the input box). It pins deeper reasoning allocation (<code>thinkingBudget: 8192</code> / deeper reasoning tier) across the centralized backend LLM router until toggled off.
+                                </p>
+                            </details>
+
+                            <details class="settings-group-card mb-3" style="padding:14px;">
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">Where are my chats, attachments, and saved memories stored?</summary>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
+                                    All conversations, custom instructions, memories, and optional on-device semantic/vision model caches stay strictly in your browser (IndexedDB, CacheStorage, and localStorage). Use <strong>Export Conversation</strong> or <strong>Backup &amp; storage</strong> (AES-256-GCM encrypted <code>.jarvis.json</code>) to move data across devices.
+                                </p>
+                            </details>
+
+                            <details class="settings-group-card mb-3" style="padding:14px;">
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">How does Saved Memory normalize follow-up facts, and does JARVIS enforce DLP?</summary>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
+                                    Saved memories run self-contained entity normalization (resolving ambiguous pronouns against recent context turns when saved) while blocking secrets and credentials via client and server Data Loss Prevention (<code>DLP Active</code> under Compliance &amp; Observability).
+                                </p>
+                            </details>
+
+                            <details class="settings-group-card mb-2" style="padding:14px;">
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">Which image formats, file sizes, and tools are supported?</summary>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
+                                    Standard images (JPEG, PNG, WebP, GIF) plus HEIC/AVIF, TIFF, PSD, and camera RAW files (up to 50 MB / 64 MP) are decoded locally in-browser via ImageMagick/LibRaw WASM before upload. Tool-capable requests also connect via standard MCP JSON-RPC 2.0 (<code>web_search</code>, <code>web_fetch</code>, <code>datetime_context</code>) and isolated in-browser Python/JS execution.
+                                </p>
+                            </details>
                         </div>
                     </div>
                 </div>

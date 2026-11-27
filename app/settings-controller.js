@@ -1,5 +1,6 @@
 import { scanDlp } from './dlp-engine.js';
 import * as recall from './context-retrieval.js';
+import * as localVision from './local-vision-engine.js';
 let editor = null, saved = '', confirming = false;
 const valueOf = element => String(element?.value || '').trim().slice(0, 1200);
 function status(message) {
@@ -49,4 +50,32 @@ export function mount(modal) {
     permissions.querySelector('#settings-permissions').onclick = () => { if (allowNavigation(() => { window.closeHelpModal(); void window.JarvisPermissions.show(); })) { window.closeHelpModal(); void window.JarvisPermissions.show(); } };
     const listener = () => { if (!group.isConnected) { window.removeEventListener('jarvis:recall-status', listener); return; } update(); };
     window.addEventListener('jarvis:recall-status', listener); update();
+
+    const visionGroup = document.createElement('div');
+    visionGroup.className = 'settings-group-card';
+    visionGroup.id = 'settings-local-vision-group';
+    visionGroup.innerHTML = `<div class="settings-row"><div class="settings-row-left"><span class="settings-icon-badge" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></span><div class="settings-row-text"><label for="local-vision-enabled" class="settings-row-title">On-Device Vision Fallback (ONNX)</label><p class="settings-row-desc">Run local image captioning, object classes, and OCR in-browser when cloud vision quotas run out.</p><p class="settings-row-desc settings-row-meta">Loads on demand via Transformers.js WASM (cached locally)</p><p id="local-vision-status" class="settings-row-desc settings-row-meta" role="status"></p></div></div><div class="settings-row-right"><label class="settings-switch"><input id="local-vision-enabled" class="settings-switch-input" type="checkbox" role="switch" aria-label="Enable on-device ONNX vision fallback"><span class="settings-switch-slider" aria-hidden="true"></span></label></div></div><div class="settings-row recall-cache-actions"><button type="button" id="vision-clear-cache" class="settings-action-btn">Clear vision model cache</button></div>`;
+    group.after(visionGroup);
+    const visionCheckbox = visionGroup.querySelector('#local-vision-enabled');
+    visionCheckbox.checked = localVision.isLocalVisionFallbackEnabled();
+    const updateVision = () => {
+        const target = visionGroup.querySelector('#local-vision-status');
+        target.textContent = ({ off: 'Disabled', idle: 'Ready on quota fallback', loading: 'Downloading on-device ONNX vision models…', ready: 'Active on this device', unavailable: 'ONNX vision unavailable; Tesseract OCR remains active.' })[localVision.getLocalVisionStatus()] || 'Ready on quota fallback';
+    };
+    visionCheckbox.setAttribute('aria-checked', String(visionCheckbox.checked));
+    visionCheckbox.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); visionCheckbox.click(); } };
+    visionCheckbox.onchange = () => {
+        visionCheckbox.setAttribute('aria-checked', String(visionCheckbox.checked));
+        void localVision.setLocalVisionFallbackEnabled(visionCheckbox.checked).then(updateVision);
+    };
+    visionGroup.querySelector('#vision-clear-cache').onclick = async () => {
+        await localVision.clearLocalVisionCache();
+        updateVision();
+    };
+    const visionListener = () => {
+        if (!visionGroup.isConnected) { window.removeEventListener('jarvis:vision-fallback-status', visionListener); return; }
+        updateVision();
+    };
+    window.addEventListener('jarvis:vision-fallback-status', visionListener);
+    updateVision();
 }

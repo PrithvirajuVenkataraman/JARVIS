@@ -16,13 +16,41 @@ test('chat reserves both model attempts for the answer instead of consuming them
     Object.assign(process.env, { GROQ_API_KEY: 'test-groq', GEMINI_API_KEY: 'test-gemini', LIVE_RETRIEVAL_ENABLED: 'true', CHAT_ROUTER_MODE: 'adaptive', SEARCH_GEMINI_GROUNDING_FREE_ALLOWANCE: 'true' });
     try {
         for (const [stream, webMode] of [[false, 'off'], [true, 'off'], [false, 'auto'], [false, 'force']]) {
-            const generations = [], lookups = [];
+            const generations = [], lookups = [], routerCalls = [];
             globalThis.fetch = async (input, init = {}) => {
                 const url = new URL(input);
                 if (/generativelanguage\.googleapis\.com|api\.groq\.com/.test(url.hostname)) {
-                    generations.push({ host: url.hostname, body: JSON.parse(init.body), path: url.pathname });
+                    const body = JSON.parse(init.body);
+                    const systemText = String(body?.messages?.[0]?.content || body?.system_instruction?.parts?.[0]?.text || '');
+                    if (systemText.includes("JARVIS's centralized semantic router")) {
+                        routerCalls.push({ host: url.hostname, path: url.pathname });
+                        const isHaiku = /autumn rain/i.test(JSON.stringify(body));
+                        const routeJson = JSON.stringify({
+                            intent: isHaiku ? 'creative haiku writing' : 'forced web retrieval check',
+                            intents: [isHaiku ? 'creative writing' : 'web lookup'],
+                            strategy: isHaiku ? 'direct_chat' : 'live_web',
+                            answerScope: isHaiku ? 'creative' : 'narrow_fact',
+                            entities: [],
+                            requiredTools: isHaiku ? [] : ['web_search'],
+                            retrievalRequired: !isHaiku,
+                            freshness: 'none',
+                            temporalWindow: 'none',
+                            verticalHint: 'general',
+                            slots: { location: '', assetOrTicker: '', league: '', make: '', model: '' },
+                            documentScope: 'none',
+                            visionLane: 'none',
+                            complexity: 'standard',
+                            standaloneQuery: isHaiku ? 'Write a short haiku about autumn rain.' : 'Reply with the single word ready.',
+                            searchQueries: isHaiku ? [] : ['Reply with the single word ready'],
+                            clarification: ''
+                        });
+                        return url.hostname === 'generativelanguage.googleapis.com'
+                            ? Response.json({ candidates: [{ content: { parts: [{ text: routeJson }] } }] })
+                            : Response.json({ choices: [{ message: { content: routeJson } }] });
+                    }
+                    generations.push({ host: url.hostname, body, path: url.pathname });
                     if (url.hostname === 'generativelanguage.googleapis.com') return Response.json({ error: { message: 'temporarily unavailable' } }, { status: 503 });
-                    return JSON.parse(init.body).stream
+                    return body.stream
                         ? new Response('data: {"choices":[{"delta":{"content":"ready"}}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } })
                         : Response.json({ choices: [{ message: { content: 'ready' } }] });
                 }
@@ -39,12 +67,16 @@ test('chat reserves both model attempts for the answer instead of consuming them
                 assert.ok(lookups.length > 0, 'Forced search still retrieves public evidence');
                 continue;
             }
-            assert.equal(generations.length, 3, `Two Gemini attempts plus one Groq failover for ${webMode}/${stream}`);
+            assert.ok(routerCalls.length <= 1, `At most one centralized routing decision per request (${webMode}/${stream})`);
+            assert.equal(generations.length, 3, `Two Gemini answer attempts plus one Groq failover remain reserved for ${webMode}/${stream}`);
             assert.match(generations[0].path, /gemini-4-hydrogen/);
             assert.match(generations[1].path, /gemini-2\.5-pro/);
             assert.equal(generations[2].host, 'api.groq.com');
             assert.equal(generations[0].body.tools, undefined, 'Chat retrieval must not spend quota on Google Search grounding');
-            if (webMode === 'off') assert.ok(!lookups.some(host => /news\.|duckduckgo|searx|gdelt/.test(host)), 'Web off must disable live-first as well as search routes');
+            if (webMode === 'off') {
+                assert.equal(routerCalls.length, 0, 'Explicit webMode=off skips unnecessary router LLM calls');
+                assert.ok(!lookups.some(host => /news\.|duckduckgo|searx|gdelt/.test(host)), 'Web off must disable live-first as well as search routes');
+            }
             if (webMode === 'force') assert.ok(lookups.length > 0, 'Forced search still retrieves public evidence');
             const payload = stream ? res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.provider === 'groq') : res.data;
             assert.equal(payload.provider, 'groq'); assert.match(payload.response, /ready/i);

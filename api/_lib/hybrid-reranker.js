@@ -136,6 +136,10 @@ export function parseDocumentDate(doc = {}, now = Date.now()) {
 
     const currentYear = new Date(now).getUTCFullYear();
     const currentMonth = new Date(now).getUTCMonth();
+    const explicitYears = [...`${url} ${rawText}`.matchAll(/\b((?:19|20)\d\d)\b/g)]
+        .map(match => parseInt(match[1], 10))
+        .filter(yr => yr >= 1990 && yr <= currentYear + 1);
+    const inferredContextYear = explicitYears.length ? Math.max(...explicitYears) : currentYear;
 
     // 3a. Explicit Calendar Dates FIRST (American Month DD YYYY, UK DD Month YYYY, ISO, Numeric)
     // American Format: Month DD, YYYY or Month DD (e.g. "October 11, 2026", "Oct 11 2026", "Oct 11")
@@ -143,8 +147,8 @@ export function parseDocumentDate(doc = {}, now = Date.now()) {
     if (m) {
         const mo = MONTH_NAMES_MAP[m[1].toLowerCase().replace('.', '')];
         const day = parseInt(m[2], 10);
-        let yr = m[3] ? parseInt(m[3], 10) : currentYear;
-        if (!m[3] && mo > currentMonth) yr = currentYear - 1;
+        let yr = m[3] ? parseInt(m[3], 10) : inferredContextYear;
+        if (!m[3] && !explicitYears.length && mo > currentMonth) yr = currentYear - 1;
         if (mo != null && day >= 1 && day <= 31) return Date.UTC(yr, mo, day);
     }
 
@@ -153,8 +157,8 @@ export function parseDocumentDate(doc = {}, now = Date.now()) {
     if (m) {
         const day = parseInt(m[1], 10);
         const mo = MONTH_NAMES_MAP[m[2].toLowerCase().replace('.', '')];
-        let yr = m[3] ? parseInt(m[3], 10) : currentYear;
-        if (!m[3] && mo > currentMonth) yr = currentYear - 1;
+        let yr = m[3] ? parseInt(m[3], 10) : inferredContextYear;
+        if (!m[3] && !explicitYears.length && mo > currentMonth) yr = currentYear - 1;
         if (mo != null && day >= 1 && day <= 31) return Date.UTC(yr, mo, day);
     }
 
@@ -246,8 +250,9 @@ export function formatDocumentDate(docDateMs, now = Date.now()) {
  */
 export function computeTemporalScore(docDateMs, dateIntent = { type: 'neutral' }, now = Date.now()) {
     if (!docDateMs || Number.isNaN(docDateMs)) {
-        if (dateIntent.type === 'immediate') return 0.25;
-        if (dateIntent.type === 'recent_week') return 0.35;
+        if (dateIntent.type === 'immediate') return 0.2;
+        if (dateIntent.type === 'recent_week') return 0.25;
+        if (dateIntent.type === 'current') return 0.35;
         if (dateIntent.type === 'target_month') return 0.25;
         return 0.5;
     }
@@ -271,8 +276,9 @@ export function computeTemporalScore(docDateMs, dateIntent = { type: 'neutral' }
     else if (dateIntent.type === 'recent_week') halfLifeDays = 6;
     else if (dateIntent.type === 'current') halfLifeDays = 21;
 
+    const floor = ['immediate', 'recent_week', 'current'].includes(dateIntent.type) ? 0.005 : 0.02;
     const decay = Math.exp(-0.693 * (ageDays / halfLifeDays));
-    return Number(Math.max(0.02, Math.min(1.0, decay)).toFixed(3));
+    return Number(Math.max(floor, Math.min(1.0, decay)).toFixed(3));
 }
 
 import { computeBM25Scores as computeBM25EngineScores } from './bm25.js';
@@ -426,8 +432,14 @@ export async function hybridRerank(query, documents = [], options = {}) {
                     return bSubstantive ? 1 : -1;
                 }
                 if (timeA && timeB) {
+                    const ONE_YEAR_MS = 365 * 24 * 3600 * 1000;
+                    const ageA = Math.max(0, now - timeA);
+                    const ageB = Math.max(0, now - timeB);
+                    if ((ageA < NINETY_DAYS_MS && ageB > ONE_YEAR_MS) || (ageB < NINETY_DAYS_MS && ageA > ONE_YEAR_MS)) {
+                        return timeB - timeA;
+                    }
                     const rrfRatio = a.rrfScore > 0 && b.rrfScore > 0 ? (b.rrfScore / a.rrfScore) : 1;
-                    if (rrfRatio >= 1.25 || rrfRatio <= 0.8) {
+                    if (rrfRatio >= 1.65 || rrfRatio <= 0.6) {
                         return b.rrfScore - a.rrfScore;
                     }
                     if (timeA !== timeB) return timeB - timeA;

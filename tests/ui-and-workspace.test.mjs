@@ -986,6 +986,35 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
     assert.ok(coreUxCss.includes('body .assistant-action-row { display:grid; grid-template-columns:repeat(4,44px);'), 'Action row must use 4 compact grid columns');
     assert.ok(coreUxCss.includes('body .text-input-dialog h2') && coreUxCss.includes('body .text-input-dialog textarea') && coreUxCss.includes('body .text-input-dialog-btn.primary'), 'Text input dialog must have unlayered dark styling overriding Tailwind preflight');
     assert.ok(indexHtml.includes('pendingEntityPayload') && indexHtml.includes('controller.__pendingResolvedVisuals'), 'Frontend must synchronize entity visual cards with text generation so media never appears before text');
+
+    // Test 8: Mobile Settings Row Stacking, Compliance Badge Wrapping, Phone Think Button, and Visual Placeholder Suppression
+    const settingsRuntimeJs = fs.readFileSync(path.resolve('app/features/settings-runtime.js'), 'utf8');
+    const { renderMarkdown } = await import('../app/markdown-renderer.js');
+
+    assert.ok(coreUxCss.includes(':has(.settings-export-buttons)'), 'Mobile settings rows with export buttons must stack below 640px');
+    assert.ok(coreUxCss.includes('.compliance-badge') && coreUxCss.includes('white-space:nowrap'), 'Compliance policy badge must stay single-line');
+    assert.ok(coreUxCss.includes('.compliance-policy-row') && coreUxCss.includes('.compliance-diagnostics-header'), 'Compliance header and diagnostics rows must stack cleanly on narrow viewports');
+    assert.ok(coreUxCss.includes('44px minmax(0,1fr) 68px'), 'Mobile help modal header must center title without wrapping button crowding');
+    assert.ok(coreUxCss.includes('.settings-row-title') && coreUxCss.includes('word-break:normal'), 'Settings row titles must never break mid-word');
+    assert.ok(settingsRuntimeJs.includes('compliance-policy-row') && settingsRuntimeJs.includes('compliance-diagnostics-header'), 'Settings runtime must apply responsive compliance row classes');
+
+    assert.ok(coreUxCss.includes('#composer-think-btn') && coreUxCss.includes('touch-action:manipulation'), 'Think button must opt into crisp mobile tap handling and elevated stacking');
+    assert.ok(indexHtml.includes('window.toggleDeepReasoningMode = toggleDeepReasoningMode;') && indexHtml.includes('window.isDeepReasoningActive = isDeepReasoningActive;'), 'Deep reasoning toggles must be exposed on window for direct action dispatch');
+    assert.ok(indexHtml.includes("'Think ×'"), 'Composer mode chips must surface an active Think × dismiss pill when deep reasoning is enabled');
+    assert.ok(chatGroqJs.includes('forceReasoning === true') && chatGroqJs.includes('thinkingBudget: 8192'), 'Backend chat route must honor deep reasoning mode across routing and Gemini thinking budget');
+
+    const visualStubMd = 'Summary paragraph.\n\n```visual\nJSON block (type: flow)\n```\n';
+    const renderedVisualStub = renderMarkdown(visualStubMd);
+    assert.ok(!renderedVisualStub.includes('JSON block (type: flow)'), 'Malformed visual placeholder fences must not render as raw VISUAL code blocks');
+    assert.ok(!renderedVisualStub.includes('1 line'), 'Suppressed visual stub must not emit a code block header');
+
+    // Test 9: Settings FAQ Sub-view, Docs Mirror, and On-Device ONNX Vision Toggle
+    assert.ok(settingsRuntimeJs.includes('id="settings-row-faq"') && settingsRuntimeJs.includes("switchSettingsView('faq')"), 'Settings About section must expose FAQ row');
+    assert.ok(settingsRuntimeJs.includes('id="settings-view-faq"'), 'Settings modal must include FAQ sub-view container');
+    assert.ok(indexHtml.includes("else if (viewName === 'faq')") && indexHtml.includes("document.getElementById('settings-view-faq')"), 'Settings view switcher must handle faq view navigation');
+    assert.ok(settingsCtrl.includes('On-Device Vision Fallback (ONNX)') && settingsCtrl.includes('id="local-vision-enabled"'), 'Settings controller must expose On-Device Vision Fallback toggle');
+    const faqDoc = fs.readFileSync(path.resolve('docs/faq.md'), 'utf8');
+    assert.ok(faqDoc.includes('# FAQ Section in Settings') && faqDoc.includes('On-Device Vision Fallback (ONNX)'), 'docs/faq.md must document Settings FAQ section and ONNX vision fallback');
 }
 
 console.log('================================================================');

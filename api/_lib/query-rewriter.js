@@ -475,10 +475,23 @@ async function callGeminiRewriter(query, apiKey, options = {}) {
  */
 export async function rewriteSearchPrompt(rawQuery, options = {}) {
     const query = String(rawQuery || '').trim();
+    const pre = options.precomputedRoute;
+    if (pre?.source === 'llm_router' && Array.isArray(pre.searchQueries) && pre.searchQueries.length > 0) {
+        return {
+            originalQuery: query,
+            intentCategory: pre.answerScope || 'overview',
+            claim: { isClaim: false, needsVerification: Boolean(pre.retrievalRequired) },
+            searchQueries: pre.searchQueries.map((qText, idx) => ({ query: qText, target: idx === 0 ? 'direct_answer' : 'freshness_check', priority: idx + 1 })),
+            rewrittenBy: 'centralized_llm_router',
+            latencyMs: Number(pre.latencyMs || 0)
+        };
+    }
+
+    const groqKey = options.customGroqKey || process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || '';
+    const geminiKey = options.customGeminiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
     const deterministicIntent = classifySearchIntent(query, options.contextTurns);
 
-    // If simple, unambiguous WH-question, skip model rewrite to conserve latency
-    if (deterministicIntent.intentCategory === 'direct_wh_question' && query.length < 60 && !options.forceModelRewrite) {
+    if (options.forceDeterministic === true || (process.env.JARVIS_LLM_ROUTER_FIRST === 'false' && deterministicIntent.intentCategory === 'direct_wh_question' && query.length < 60 && !options.forceModelRewrite)) {
         return {
             originalQuery: query,
             intentCategory: deterministicIntent.intentCategory,
@@ -490,9 +503,6 @@ export async function rewriteSearchPrompt(rawQuery, options = {}) {
             latencyMs: 0
         };
     }
-
-    const groqKey = options.customGroqKey || process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || '';
-    const geminiKey = options.customGeminiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
 
     const t0 = performance.now();
     let modelResult = null;

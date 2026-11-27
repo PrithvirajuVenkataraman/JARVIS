@@ -149,3 +149,10 @@ To rollback immediately:
 SEARCH_CIRCUIT_BREAKER=false
 SEARCH_EARLY_EXIT=false
 ```
+
+---
+
+## 8. MCP JSON-RPC 2.0 & Chronological Recency Updates
+
+- **Standard MCP Envelope (`api/search.js`)**: `/api/search` handles JSON-RPC 2.0 `tools/list` and `tools/call` requests for `web_search`, `web_fetch`, and `datetime_context`, wired end-to-end with `runAgenticToolLoop` in `app/tool-dispatcher.js` and `app/agent-orchestrator.js`.
+- **Chronological Year Inference & Staleness Suppression (`api/_lib/hybrid-reranker.js`, `api/_lib/research-evidence.js`, `api/search.js`)**: Undated `Month DD` snippets infer explicit years present in URLs/titles/snippets before scoring; `rankResearchEvidence` computes `Math.exp(-ageDays / 45)` on day-scale differences and penalizes stale `>540d` sources when fresh `<=180d` candidates exist; `rankSources` applies chronological `<=90d` vs `>365d` ranking guards on non-historical queries.

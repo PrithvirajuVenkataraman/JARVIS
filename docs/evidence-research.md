@@ -1,4 +1,4 @@
-﻿# Evidence-backed live research
+# Evidence-backed live research
 
 Live Web Search stays enabled in its conversation until switched off. New chats start with search off; restoring a chat restores its setting. Only the active chat supplies context. Stop, starting a chat and switching chats abort research, settle the outer request and ignore late callbacks. A previous answer remains visible until a supported replacement is ready.
 
@@ -24,7 +24,7 @@ Sources retain separate snippet, article text, extraction status, publisher, ori
 
 General search uses the existing free DuckDuckGo/SearXNG providers first. News feeds supplement insufficient direct results. Wikipedia is supplementary reference material. Redirect wrappers preserve publisher information; unreadable wrappers can recover an original through an exact-title and publisher search. Extraction reads public HTML and bounded same-origin references. Optional browser extraction runs only against an explicitly configured existing `CRAWL4AI_URL` or `CRAWL4AI_ENDPOINT` service; no service is provisioned.
 
-No separate planning or review generation runs on the production research path. Retrieval gathers passages before one final structured generation with at most two provider attempts across the turn. Empty retrieval makes no generation call. Text uses existing Groq/Gemini credentials and allowances, without paid search tools, external reranking or credential rotation. Configured accounts still have quotas; this code cannot guarantee that an account itself is unbilled.
+No separate planning or review generation runs on the production research path. Retrieval gathers passages before one final structured generation with at most two provider attempts across the turn. Empty retrieval makes no generation call. Automatic research synthesis prioritizes Groq (`openai/gpt-oss-120b`, then `qwen/qwen3.8-27b`, then `openai/gpt-oss-20b`) with failover to Google Gemini (`gemini-2.5-flash`, `gemini-2.5-flash-lite`) using existing credentials and allowances, without paid search tools, external reranking or credential rotation; explicit Gemini model selections run Gemini first. Chronological reranking (`rankResearchEvidence`, `hybridRerank`, `rankSources`) infers explicit years from source URLs/snippets on partial month-day dates and applies exponential day-scale recency decay plus staleness penalties so current reports outrank old archives. Configured accounts still have quotas; this code cannot guarantee that an account itself is unbilled.
 
 Each attempt has its own timeout. A slow primary leaves time for a fallback. HTTP failures, quota responses, timeouts, malformed responses and rejected facts have safe diagnostic reasons. Cooldowns are scoped to credential and model; credentials and response bodies are excluded from diagnostic records. Production research uses retrieval-only providers, so Google Search grounding cannot consume the two answer attempts even if its allowance flag is set.
 

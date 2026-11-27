@@ -15,7 +15,7 @@ Commit the source project to GitHub. Vercel installs the locked dependencies and
 | `.gitignore`, `.vercelignore`, `.env.example` | Exclusions and empty configuration template |
 | `.github/`, `tests/`, `tools/`, `scripts/` | CI, regressions, local development, and maintenance |
 | `eslint.config.js`, `jsconfig.check.json`, `playwright.config.js` | Code quality and browser-test configuration |
-| `README.md`, `MODELS.md`, `SYSTEM_DESIGN.md`, `ENTERPRISE_RAG_AND_SYSTEM_ARCHITECTURE.md`, `Live web search.md`, `docs/` | Setup and technical reference |
+| `README.md`, `MODELS.md`, `SYSTEM_DESIGN.md`, `ENTERPRISE_RAG_AND_SYSTEM_ARCHITECTURE.md`, `Live web search.md`, `docs/` (`faq.md`, etc.) | Setup, Settings FAQ mirror, and technical reference |
 
 Preserve directory names and include dotfiles when using GitHub's upload interface. Git is preferable because the same commit can record removed files; uploading replacements through the website does not delete old repository files automatically.
 
@@ -115,7 +115,7 @@ The STT route validates base64, MIME type and the 4 MB JSON transport limit. Val
 
 ## Vision credential troubleshooting
 
-Automatic text chat and research now start with Gemini Hydrogen (`gemini-4-hydrogen`), then use a configured Groq fallback when necessary. Select Automatic in Settings to use this policy; an explicit saved model selection remains a manual preference. Older `GEMINI_MODEL` values are retained as fallback candidates rather than replacing the Automatic primary. Provider labels identify the model that actually answered. [Google's model documentation](https://aistudio.google.com/docs/models/gemini-4-hydrogen) lists a free tier; account quotas still apply. Google Search grounding remains opt-in because it is separate from free text inference.
+Automatic text chat prefers Gemini with Groq fallback, while automatic live web research synthesis prioritizes Groq (`openai/gpt-oss-120b` -> `qwen/qwen3.8-27b` -> `openai/gpt-oss-20b`) with Gemini fallback. Select Automatic in Settings to use this policy; an explicit saved model selection remains a manual preference. When cloud vision quotas exhaust, the browser automatically falls back to client-side Tesseract WASM OCR (`app/attachments.js`) and on-demand ONNX vision captioning/classification (`app/vision-worker.js`, `app/local-vision-engine.js`). Provider labels identify the model that actually answered. Older `GEMINI_MODEL` values are retained as fallback candidates rather than replacing the Automatic primary. Google Search grounding remains opt-in because it is separate from free text inference.
 
 Chat JSON responses and terminal stream events include `upstreamAttempts` when an upstream generation failed. These diagnostics report provider/model names, HTTP statuses, safe reason codes, and recognized rejected parameter names. They exclude raw upstream error bodies, credentials, and prompt/answer text. An Automatic answer labelled Groq can therefore be distinguished from a successful Hydrogen answer without exposing keys.
 
