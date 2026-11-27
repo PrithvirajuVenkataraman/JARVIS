@@ -1893,6 +1893,103 @@ test('Multi-question prompts and named-person live searches preserve all questio
         assert.ok(result.research.requirements.every(r => r.type === 'explanation'));
         assert.ok(seenSearchQueries.some(q => /latest news recent updates ongoing/i.test(q)), 'Must query ongoing updates for named person');
         assert.ok(result.facts.length >= 3, 'Must return intro, role, and ongoing 2026 facts');
+        assert.ok(result.research.requirements.some(r => /living or passed away/i.test(r.description)), 'Named person requirements must include vital status check');
+    } finally {
+        globalThis.fetch = originalFetch;
+        clearResearchModelHealth();
+    }
+
+    // Universal entity lifecycle & status checks: companies (private vs public/IPO & amount) and arbitrary non-person subjects
+    const companyReqs = buildResearchRequirements('Tell me about Zenith Cloud', [], {
+        llmRouted: true,
+        answerScope: 'overview',
+        entities: [{ name: 'Zenith Cloud', type: 'company' }]
+    });
+    assert.ok(companyReqs.some(r => /private or publicly traded/i.test(r.description) && /IPO/i.test(r.description)), 'Company entity requirements must request public/private & IPO valuation/amount status');
+    assert.ok(companyReqs.some(r => /current status latest news updates/i.test(r.searchQuery || '')), 'Company entity requirements must search current status and latest updates');
+
+    const productReqs = buildResearchRequirements('Tell me about Horizon-X spacecraft', [], {
+        llmRouted: true,
+        answerScope: 'overview',
+        entities: [{ name: 'Horizon-X', type: 'product' }]
+    });
+    assert.ok(productReqs.some(r => /active, available, released, upcoming, ongoing, discontinued/i.test(r.description)), 'Non-person/non-company entities must request universal lifecycle state and recent milestones');
+    assert.ok(productReqs.some(r => /current status latest news updates/i.test(r.searchQuery || '')));
+
+    clearResearchModelHealth();
+    const zenithArticle = 'Zenith Cloud is an enterprise data infrastructure provider founded in 2019. In June 2026, Zenith Cloud went public on NASDAQ under ticker ZCLD, raising $1.2 billion at a $14 billion valuation.';
+    globalThis.fetch = async (url, init) => {
+        const isGemini = String(url).includes('googleapis.com');
+        const body = JSON.parse(init.body);
+        const promptRaw = isGemini ? (body.contents?.[0]?.parts?.[0]?.text || '') : JSON.stringify(body.messages || []);
+        const isSynthesis = promptRaw.includes('sourceExcerpts') && promptRaw.includes('requirements');
+        if (!isSynthesis) {
+            const planPayload = JSON.stringify({
+                query: 'Tell me about Zenith Cloud',
+                answerScope: 'overview',
+                entities: [{ name: 'Zenith Cloud', type: 'company' }],
+                queries: [
+                    'Tell me about Zenith Cloud',
+                    'Zenith Cloud IPO public valuation amount raised'
+                ]
+            });
+            return isGemini
+                ? Response.json({ candidates: [{ content: { parts: [{ text: planPayload }] }, finishReason: 'STOP' }] })
+                : Response.json({ choices: [{ message: { content: planPayload }, finish_reason: 'stop' }] });
+        }
+        const promptData = isGemini
+            ? JSON.parse(body.contents[0].parts[0].text)
+            : JSON.parse(body.messages.find(m => m.role === 'user')?.content || '{}');
+        const match = String(promptData.sourceExcerpts || '').match(/\[(\d+)\] Zenith Cloud/);
+        const sid = Number(match?.[1] || 1);
+        const synthPayload = JSON.stringify({
+            facts: [
+                {
+                    id: 'f1',
+                    requirementId: promptData.requirements[0]?.id || 'r1',
+                    value: 'Zenith Cloud is an enterprise data infrastructure provider founded in 2019',
+                    quote: 'Zenith Cloud is an enterprise data infrastructure provider founded in 2019.',
+                    sourceId: sid
+                },
+                {
+                    id: 'f2',
+                    requirementId: promptData.requirements[1]?.id || 'r2',
+                    value: 'In June 2026, Zenith Cloud went public on NASDAQ under ticker ZCLD, raising $1.2 billion at a $14 billion valuation',
+                    quote: 'In June 2026, Zenith Cloud went public on NASDAQ under ticker ZCLD, raising $1.2 billion at a $14 billion valuation.',
+                    sourceId: sid
+                }
+            ],
+            gaps: []
+        });
+        return isGemini
+            ? Response.json({ candidates: [{ content: { parts: [{ text: synthPayload }] }, finishReason: 'STOP' }] })
+            : Response.json({ choices: [{ message: { content: synthPayload }, finish_reason: 'stop' }] });
+    };
+    const seenCompanyQueries = [];
+    try {
+        const companyPlan = await planResearch('Tell me about Zenith Cloud', [], {
+            customGroqKey: 'test-groq',
+            customGeminiKey: 'test-gemini'
+        });
+        const companyOut = await runResearch('Tell me about Zenith Cloud', {
+            customGroqKey: 'test-groq',
+            customGeminiKey: 'test-gemini',
+            timeoutMs: 35000
+        }, {
+            plan: async () => companyPlan,
+            search: async q => {
+                seenCompanyQueries.push(q);
+                return [{
+                    title: 'Zenith Cloud IPO Filing & Market Debut',
+                    url: 'https://markets.example/zenith-cloud',
+                    snippet: zenithArticle
+                }];
+            },
+            extract: async url => ({ url, bodyText: zenithArticle })
+        });
+        assert.equal(companyOut.answerStatus, 'complete', 'Company live research must complete with IPO/valuation facts');
+        assert.ok(seenCompanyQueries.some(q => /current status latest news updates/i.test(q)), 'Company Round 0 search must include current status query');
+        assert.ok(companyOut.facts.some(f => /\$1\.2 billion.*\$14 billion/i.test(f.value)), 'Company research must preserve IPO amount and valuation');
     } finally {
         globalThis.fetch = originalFetch;
         clearResearchModelHealth();

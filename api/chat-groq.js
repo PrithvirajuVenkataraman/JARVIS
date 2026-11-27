@@ -1776,6 +1776,7 @@ async function handler(req, res) {
                 'PERSON & ENTITY LOOKUP POLICY:',
                 '- The user entered a bare name, brief title/role, or direct entity lookup.',
                 '- Answer directly from established knowledge by identifying and explaining who the primary notable person or entity is (their role, organization or field, and key background) without asking clarifying questions.',
+                '- Where established, also state the subject\'s known status (for a person: whether living or deceased with year if applicable; for a company/organization: private, publicly traded, or acquired; for any other subject: active, released, or discontinued state) without inventing unverified recent events.',
                 '- Do NOT ask "which [Name] are you referring to?", ask for their field, role, or company, or tell the user to turn on Web Search just to identify the person or entity.',
                 '- Never invent unverified dates, recent news, or private details.',
                 '- At the end, add one brief sentence telling the user that if they need any latest updates, they can turn on Web Search and ask a follow-up query.'

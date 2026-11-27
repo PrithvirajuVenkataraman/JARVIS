@@ -328,6 +328,9 @@ function buildSingleQuestionRequirements(query, _context = [], options = {}) {
         || PERSON_ROLE_PROFESSION_RE.test(q)
         || /^(?:dr|prof|mr|mrs|ms|sir|lord)\.?\s+[A-Za-z]/i.test(q)
     );
+    const matchingGeneralEntity = !isNamedPersonSubject && !isRole && !isEntityLookup && !count && comparison.entities.length === 0
+        ? routedEntities.find(e => e?.name && e.type !== 'person' && researchTerms(e.name).some(t => researchTerms(q).includes(t)))
+        : null;
 
     if (comparison.entities.length >= 2) {
         for (const entity of comparison.entities) {
@@ -346,12 +349,29 @@ function buildSingleQuestionRequirements(query, _context = [], options = {}) {
                 searchQuery: q
             });
         }
-        add('explanation', `Awards, recognition, latest news, current status, and ongoing projects or recent developments for ${subjectLabel}`, {
+        add('explanation', `Awards, recognition, vital status (whether living or passed away/deceased, with date if reported), latest news, current status, and ongoing projects or recent developments for ${subjectLabel}`, {
             searchQuery: `${subjectTerms} latest news recent updates ongoing`
         });
         const specificDate = !/\bwho\s+(?:is|was)\b/i.test(focusQ)
             && /\bwhen\b|\b(?:what|which)\s+(?:is\s+the\s+)?(?:date|year)|\b(?:release|birth|publication|election|founding|launch|start|end|next|upcoming)?\s*dates?\b/i.test(focusQ);
         if (specificDate) add('date', `Establish the requested date or timing for ${q}`);
+    } else if (matchingGeneralEntity) {
+        const entityLabel = matchingGeneralEntity.name;
+        const entityType = matchingGeneralEntity.type || 'subject';
+        const entityTerms = researchTerms(entityLabel).slice(0, 5).join(' ') || q;
+        const statusGuidance = entityType === 'company' || entityType === 'organization'
+            ? `Current corporate and market status of ${entityLabel}: whether it is private or publicly traded, whether it has gone public recently (IPO date, exchange, and how much was raised or valuation if reported), any acquisition or shutdown, and latest news or ongoing developments`
+            : `Current real-world status and lifecycle state of ${entityLabel}: whether it is active, available, released, upcoming, ongoing, discontinued, or changed, major recent figures/milestones (such as valuation, pricing, version, or outcome), and latest verified news or updates`;
+        add('explanation', `Core identity and overview introducing ${entityLabel} (${entityType}), what it is, its background or purpose, and direct details addressing: ${q}`, {
+            searchQuery: q
+        });
+        add('explanation', statusGuidance, {
+            searchQuery: `${entityTerms} current status latest news updates`
+        });
+        const specificDate = /\bwhen\b|\b(?:what|which)\s+(?:is\s+the\s+)?(?:date|year)|\b(?:release|birth|publication|election|founding|launch|start|end|ipo|next|upcoming)?\s*dates?\b/i.test(focusQ);
+        const specificValue = /\bhow (?:many|much|old|long|far|fast|large|big|tall|deep|wide)\b|\b(?:price|cost|population|rate|score|temperature|gdp|net\s*worth|valuation|revenue|market\s*cap|funding|raised)\b/i.test(focusQ);
+        if (specificDate) add('date', `Establish the requested date or timing for ${q}`);
+        if (specificValue) add('value', `Establish the requested amount, valuation, or numerical figure for ${q}`);
     } else {
         const plannerRequestsOverview = options.answerScope === 'overview' || options.answerScope === 'person_bio';
         const explicitNamesAsk = !plannerRequestsOverview && !isDirectWhoIdentity
@@ -377,9 +397,9 @@ function buildSingleQuestionRequirements(query, _context = [], options = {}) {
         if (value) add('value', `Establish the requested numerical value for ${q}`);
         if (!requirements.length) {
             const subjectTerms = researchTerms(focusQ).slice(0, 5).join(' ') || q;
-            add('explanation', `Comprehensive overview explaining ${q}: background, key details, impact, and latest developments`, {
+            add('explanation', `Comprehensive overview explaining ${q}: background, key details, current real-world status or lifecycle state (e.g. living or deceased for people, private vs publicly traded/IPO amount for companies, active/released/discontinued state and key figures for any subject), impact, and latest developments`, {
                 expectedCount: /^(?:reasons|ways|steps)$/i.test(count?.[2] || '') ? expectedCount : undefined,
-                searchQuery: `${subjectTerms} overview latest updates`
+                searchQuery: `${subjectTerms} current status latest updates`
             });
         }
     }
