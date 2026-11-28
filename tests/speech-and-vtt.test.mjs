@@ -57,9 +57,12 @@ class FakeRecognition {
     emitResult(transcript, isFinal = true) {
         const item = [{ transcript }];
         item.isFinal = Boolean(isFinal);
+        this.results ||= [];
+        const index = this.results.at(-1)?.isFinal ? this.results.length : Math.max(0, this.results.length - 1);
+        this.results[index] = item;
         this.onresult?.({
-            resultIndex: 0,
-            results: [item]
+            resultIndex: index,
+            results: this.results
         });
     }
 
@@ -471,7 +474,7 @@ await globalThis.toggleVoiceToText(); // stop
 
     // Toggle dictation
     await uiController.toggleDictation();
-    assert.equal(composerShell.classList.contains('is-voice-active'), true);
+    assert.equal(composerShell.classList.contains('is-voice-active'), false, 'Dictation keeps the normal composer visible and editable');
     assert.equal(statusEl.textContent, '', 'Status text should not contain prototype Listening text');
 
     // Stop dictation
@@ -1235,9 +1238,12 @@ class MockContinuousRecognition {
     emitResult(transcript, isFinal = true) {
         const item = [{ transcript, confidence: 0.96 }];
         item.isFinal = Boolean(isFinal);
+        this.results ||= [];
+        const index = this.results.at(-1)?.isFinal ? this.results.length : Math.max(0, this.results.length - 1);
+        this.results[index] = item;
         this.onresult?.({
-            resultIndex: 0,
-            results: [item]
+            resultIndex: index,
+            results: this.results
         });
     }
 }
@@ -1428,11 +1434,12 @@ console.log('\n--- Test 4: VTT Silence Auto-Stop Safeguard ---');
     rec.emitResult('Testing silence detection.', true);
     assert.equal(controller.getState().listening, true, 'Immediate pause keeps listening');
 
-    // Wait for silence timeout
+    // A thinking pause must not end dictation after recognized speech.
     await new Promise(r => setTimeout(r, 80));
-    assert.equal(controller.getState().listening, false, 'Auto-stops on silence');
-    assert.equal(controller.getState().mode, 'idle', 'Transitions to idle');
-    console.log('  [PASS] 4.1 Silence auto-stop terminates dictation and turns off mic');
+    assert.equal(controller.getState().listening, true, 'Thinking pauses keep dictation active');
+    controller.stop();
+    assert.equal(controller.getState().mode, 'idle', 'Explicit Stop releases dictation');
+    console.log('  [PASS] 4.1 Thinking pauses preserve dictation until explicit Stop');
 }
 
 // ─── Test 5: Keyboard Shortcut Safeguard (No Bare Spacebar Microphone Hijack) ──
@@ -1578,9 +1585,12 @@ class MockRecognition {
     emitResult(transcript, isFinal = true) {
         const item = [{ transcript, confidence: 0.95 }];
         item.isFinal = Boolean(isFinal);
+        this.results ||= [];
+        const index = this.results.at(-1)?.isFinal ? this.results.length : Math.max(0, this.results.length - 1);
+        this.results[index] = item;
         this.onresult?.({
-            resultIndex: 0,
-            results: [item]
+            resultIndex: index,
+            results: this.results
         });
     }
 }

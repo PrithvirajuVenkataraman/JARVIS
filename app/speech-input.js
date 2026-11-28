@@ -1,4 +1,5 @@
 import { serializeRequestPayload, isPayloadTooLarge } from './request-payload.js';
+import { createDictationController, createDictationDraft } from './dictation-session.js';
 
 /**
  * Unified Enterprise Voice-to-Text (VTT / Dictation) Controller.
@@ -558,6 +559,49 @@ export function createWhisperRecorder(options = {}) {
  * Creates the complete Speech & Converse Controller combining native SpeechRecognition + Whisper STT.
  */
 export function createSpeechInputController(options = {}) {
+    const Recognition = options.Recognition === undefined
+        ? (globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition || null)
+        : options.Recognition;
+    const dictation = createDictationController({
+        ...options, Recognition, createRecorder: createWhisperRecorder,
+        formatTranscript: cleanPostStopTranscript, normalizeLanguage: normalizeVoiceInputLanguage
+    });
+    // Keep the existing, disabled Converse API compatible without sharing dictation state.
+    let converse = null;
+    let converseActive = false;
+    const current = () => converseActive ? converse : dictation;
+    return {
+        getState: () => current().getState(),
+        setLanguage: value => current().setLanguage(value),
+        async toggleDictation(settings) {
+            if (converseActive) { converse.stop({ disableConverse: true, cancelled: true }); converseActive = false; }
+            return await dictation.toggleDictation(settings);
+        },
+        async start(settings = {}) {
+            if (settings.converse || converseActive) {
+                dictation.stop({ cancelled: true });
+                converse ||= createLegacyConverseController(options);
+                converseActive = true;
+                return await converse.start({ ...settings, converse: true });
+            }
+            return await dictation.start();
+        },
+        async toggleConverse() {
+            if (converseActive) { converse.stop({ disableConverse: true }); converseActive = false; return false; }
+            return await this.start({ converse: true });
+        },
+        stop(settings = {}) {
+            current().stop(settings);
+            if (settings.disableConverse) converseActive = false;
+        },
+        setProcessing: value => current().setProcessing(value),
+        prepareSubmit: () => converseActive ? Promise.resolve(true) : dictation.prepareSubmit(),
+        resumeListening: () => converseActive ? converse.resumeListening() : false,
+        _callbacks: { onInterim: options.onInterim || (() => {}), onFinal: options.onFinal || (() => {}), onState: options.onState || (() => {}), onError: options.onError || (() => {}) }
+    };
+}
+
+function createLegacyConverseController(options = {}) {
     const Recognition = options.Recognition || (typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null);
     const callbacks = {
         onInterim: options.onInterim || (() => {}),
@@ -1439,8 +1483,8 @@ export function installSpeechInputUI(options = {}) {
 
     const visualizer = vttWaveform ? createAudioVisualizer(vttWaveform) : null;
     const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
-    let sessionPrefix = '';
-    let sessionSpokenText = '';
+    const dictationDraft = createDictationDraft();
+    dictationDraft.reset(input.value || '');
     let writingTranscript = false;
 
     input.addEventListener('input', event => {
@@ -1448,19 +1492,16 @@ export function installSpeechInputUI(options = {}) {
         delete input.dataset.inputSource;
         const currentVal = input.value;
         const state = controller?.getState?.();
-        if (event?.isTrusted && (state?.listening || state?.transcribing || state?.finishing)) {
+        if (state?.mode === 'dictation' || state?.transcribing || state?.finishing || state?.submissionPending) {
             controller.stop({ disableConverse: true, cancelled: true });
             input.value = currentVal;
         }
-        if (!controller?.getState?.()?.listening) {
-            sessionPrefix = currentVal.trim();
-            sessionSpokenText = '';
-        }
+        dictationDraft.reset(currentVal);
     });
 
     globalThis.resetSpeechInputCommittedText = () => {
-        sessionPrefix = '';
-        sessionSpokenText = '';
+        controller.stop({ cancelled: true });
+        dictationDraft.reset(input.value || '');
     };
 
     function setStatusText(message = '') {
@@ -1472,16 +1513,16 @@ export function installSpeechInputUI(options = {}) {
     const controller = createSpeechInputController({
         Recognition,
         language: 'en-US',
+        onSessionStart({ sessionId }) { dictationDraft.begin(sessionId, input.value); },
+        onCancel() { dictationDraft.reset(input.value); },
         onInterim(text, state) {
             const isConverse = Boolean(state?.converseEnabled);
             const cleaned = cleanSpeechFillers(text);
-            sessionSpokenText = cleaned;
 
             if (!isConverse) {
                 // VTT Dictation: words stream directly into the chatbox (input textarea), NOT on the chat window
-                const fullText = sessionPrefix
-                    ? `${sessionPrefix}${cleaned ? (cleaned.startsWith('\n') ? '' : ' ') + cleaned : ''}`
-                    : cleaned;
+                const fullText = dictationDraft.update(state.sessionId, cleaned, input.value);
+                if (fullText === null) return;
                 input.value = fullText;
                 delete input.dataset.inputSource;
                 options.onComposerChanged?.();
@@ -1500,16 +1541,8 @@ export function installSpeechInputUI(options = {}) {
             // Strictly clear any live speech rows on the chat window
             globalThis.clearLiveSpeechTranscriptionOnScreen?.();
 
-            if (!cleaned) {
+            if (!cleaned && isConverse) {
                 // If user spoke nothing or random noise was captured, leave prompt window clean
-                if (!isConverse) {
-                    input.value = sessionPrefix || '';
-                    delete input.dataset.inputSource;
-                    options.onComposerChanged?.();
-                    globalThis.handleComposerInput?.();
-                    globalThis.autoResizeComposerTextarea?.();
-                    globalThis.toggleSendButton?.();
-                }
                 return;
             }
 
@@ -1526,11 +1559,9 @@ export function installSpeechInputUI(options = {}) {
                 });
             } else {
                 // Enterprise VTT Dictation: Words appear in the chatbox, NOT on the chat window!
-                sessionSpokenText = cleaned;
-                const fullText = sessionPrefix
-                    ? `${sessionPrefix}${cleaned.startsWith('\n') ? '' : ' '}${cleaned}`
-                    : cleaned;
-                input.value = fullText.trim();
+                const fullText = dictationDraft.update(event?.sessionId, cleaned, input.value, Boolean(event?.settled));
+                if (fullText === null) return;
+                input.value = fullText;
                 delete input.dataset.inputSource;
 
                 try {
@@ -1546,12 +1577,14 @@ export function installSpeechInputUI(options = {}) {
                 globalThis.autoResizeComposerTextarea?.();
                 globalThis.toggleSendButton?.();
 
-                try {
-                    input.focus();
-                    if (typeof input.setSelectionRange === 'function') {
-                        input.setSelectionRange(input.value.length, input.value.length);
-                    }
-                } catch (_) {}
+                if (controller.getState().mode === 'idle') {
+                    try {
+                        input.focus();
+                        if (typeof input.setSelectionRange === 'function') {
+                            input.setSelectionRange(input.value.length, input.value.length);
+                        }
+                    } catch (_) {}
+                }
             }
         },
         onState(state) {
@@ -1571,7 +1604,7 @@ export function installSpeechInputUI(options = {}) {
             const isListening = Boolean(state.listening);
             const isProcessing = Boolean(state.processing);
             const isCleaningUp = Boolean(state.transcribing) && !isListening;
-            const isDictation = state.mode === 'dictation' && isListening;
+            const isDictation = state.mode === 'dictation' && (isListening || state.starting);
             const isConverse = Boolean(state.converseEnabled);
 
             vttButton.classList.toggle('is-listening', isDictation);
@@ -1582,9 +1615,9 @@ export function installSpeechInputUI(options = {}) {
             if (sendBtn) { sendBtn.classList.remove('is-converse-active', 'is-converse-ready'); }
 
             if (composerShell) {
-                // Voice active styling strictly applies ONLY when actively listening to voice
-                composerShell.classList.toggle('is-voice-active', isListening);
-                composerShell.classList.toggle('is-processing', isCleaningUp || (isListening && isProcessing));
+                // Dictation edits the normal composer. These overlay classes hide/disable it.
+                composerShell.classList.toggle('is-voice-active', isConverse && isListening);
+                composerShell.classList.toggle('is-processing', isConverse && (isCleaningUp || (isListening && isProcessing)));
             }
 
             if (vttWaveform) {
@@ -1607,13 +1640,14 @@ export function installSpeechInputUI(options = {}) {
         },
         onError(message) {
             globalThis.clearLiveSpeechTranscriptionOnScreen?.();
-            vttButton.classList.remove('is-listening');
-            vttButton.setAttribute('aria-pressed', 'false');
+            const stillDictating = controller.getState().mode === 'dictation';
+            vttButton.classList.toggle('is-listening', stillDictating);
+            vttButton.setAttribute('aria-pressed', stillDictating ? 'true' : 'false');
             if (vttWaveform) {
                 vttWaveform.classList.add('hidden');
                 vttWaveform.classList.remove('is-active', 'is-processing');
             }
-            if (composerShell) {
+            if (composerShell && !stillDictating) {
                 composerShell.classList.remove('is-voice-active', 'is-processing');
             }
             visualizer?.stop();
@@ -1638,7 +1672,6 @@ export function installSpeechInputUI(options = {}) {
             // Second press: user stops dictation (ChatGPT style)
             const res = await controller.toggleDictation();
             if (input && !controller.getState().transcribing) {
-                sessionSpokenText = '';
                 try {
                     input.focus();
                     if (typeof input.setSelectionRange === 'function') {
@@ -1658,8 +1691,6 @@ export function installSpeechInputUI(options = {}) {
             return res;
         } else {
             // First press: user starts dictation
-            sessionPrefix = input ? input.value.trim() : '';
-            sessionSpokenText = '';
             return controller.toggleDictation();
         }
     };

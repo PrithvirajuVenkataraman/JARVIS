@@ -7570,6 +7570,12 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             sendBtn.title = 'Send message';
             sendBtn.setAttribute('aria-label', 'Send message');
             sendBtn.innerHTML = getSendIconSvg();
+            if (window.JarvisSpeechInput?.getState?.().submissionPending) {
+                sendBtn.disabled = true;
+                sendBtn.title = 'Finishing voice input';
+                sendBtn.setAttribute('aria-label', 'Finishing voice input');
+                return;
+            }
             const hasText = Boolean(input && hasSearchableContent(input.value));
             const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
             const isPreparing = Number(window.__jarvisAttachmentPreparations || 0) > 0;
@@ -14371,6 +14377,7 @@ async function sendTextInput(submission = {}) {
                 showTemporaryMessage('Preparing attachments. Please wait a moment before sending.');
                 return;
             }
+            if (window.JarvisSpeechInput?.prepareSubmit && !await window.JarvisSpeechInput.prepareSubmit()) return;
             const isVoice = submission?.source === 'vtt' || submission?.source === 'converse';
             const vttWave = document.getElementById('vtt-waveform-container');
             const compShell = document.getElementById('input-bar-inner');
@@ -28089,6 +28096,7 @@ function migrateLegacyHistoryToChatSession() {
 }
 
 function startNewChatSession(options = {}) {
+    window.JarvisSpeechInput?.stop?.({ cancelled: true, disableConverse: true });
     stopActiveGeneration('new_chat');
     conversationContext = [];
     setWebSearchMode('off', { persist: false });
@@ -28759,6 +28767,7 @@ function restoreConversationEngineForSession(session) {
 function restoreChatSession(sessionId) {
     const session = chatSessions.find(item => item.id === sessionId && !item.deleted);
     if (!session) return;
+    window.JarvisSpeechInput?.stop?.({ cancelled: true, disableConverse: true });
     stopActiveGeneration('switch_chat');
     closeChatSessionMenu();
     activeChatSessionId = session.id;

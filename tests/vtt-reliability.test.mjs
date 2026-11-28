@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanSpeechFillers, cleanPostStopTranscript, mergeTranscriptSegment, createWhisperRecorder, createSpeechInputController } from '../app/speech-input.js';
+import { createDictationDraft } from '../app/dictation-session.js';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
@@ -132,7 +133,10 @@ test('word-by-word VTT deduplicates punctuation drift and runs post-stop cleanup
         start() { this.onstart?.(); }
         stop() {}
         emit(text, isFinal) {
-            this.onresult?.({ resultIndex: 0, results: [{ isFinal, 0: { transcript: text } }] });
+            this.results ||= [];
+            const index = this.results.at(-1)?.isFinal ? this.results.length : Math.max(0, this.results.length - 1);
+            this.results[index] = { isFinal, 0: { transcript: text } };
+            this.onresult?.({ resultIndex: index, results: this.results });
         }
     }
     const controller = createSpeechInputController({
@@ -147,13 +151,13 @@ test('word-by-word VTT deduplicates punctuation drift and runs post-stop cleanup
         const rec = StreamingRecognition.instances.at(-1);
         rec.emit('hello', false);
         rec.emit('hello world.', true);
-        rec.emit('hello world today', false);
+        rec.emit('today', false);
         assert.deepEqual(interims, ['Hello', 'Hello world.', 'Hello world. Today']);
 
         controller.stop();
         assert.equal(controller.getState().listening, false);
         assert.equal(controller.getState().transcribing, true);
-        rec.emit('um uh hello world today period', true);
+        rec.emit('um uh today period', true);
         await new Promise(resolve => setTimeout(resolve, 65));
         assert.equal(controller.getState().transcribing, false);
         assert.equal(finals.at(-1), 'Hello world. Today.');
@@ -161,3 +165,156 @@ test('word-by-word VTT deduplicates punctuation drift and runs post-stop cleanup
         controller.stop({ cancelled: true });
     }
 });
+
+class DrainingRecognition {
+    static instances = [];
+    constructor() { this.results = []; DrainingRecognition.instances.push(this); }
+    start() { this.onstart?.(); }
+    stop() {}
+    abort() { this.aborted = true; this.onend?.(); }
+    emit(text, isFinal = false) {
+        const index = this.results.at(-1)?.isFinal ? this.results.length : Math.max(0, this.results.length - 1);
+        this.results[index] = { isFinal, 0: { transcript: text } };
+        this.onresult?.({ resultIndex: index, results: this.results });
+    }
+}
+
+test('Stop preserves the visible interim tail even when the browser never sends its final result', async () => {
+    const finals = [];
+    const controller = createSpeechInputController({ Recognition: DrainingRecognition, postStopCleanupMs: 15, onFinal: text => finals.push(text) });
+    try {
+        await controller.toggleDictation(); const rec = DrainingRecognition.instances.at(-1);
+        rec.emit('First thought.', true); rec.emit('second thought', false);
+        controller.stop(); await new Promise(resolve => setTimeout(resolve, 30));
+        assert.equal(finals.at(-1), 'First thought. Second thought');
+        assert.equal(controller.getState().finishing, false);
+        assert.equal(rec.aborted, true);
+    } finally { controller.stop({ cancelled: true }); }
+});
+
+test('an immediate restart drains the preceding native result and assigns the next clip a distinct identity', async () => {
+    const draft = createDictationDraft(); let value = 'Draft:';
+    const ids = [];
+    const controller = createSpeechInputController({
+        Recognition: DrainingRecognition, postStopCleanupMs: 100,
+        onSessionStart({ sessionId }) { ids.push(sessionId); draft.begin(sessionId, value); },
+        onInterim(text, event) { value = draft.update(event.sessionId, text, value) ?? value; },
+        onFinal(text, event) { value = draft.update(event.sessionId, text, value, event.settled) ?? value; }
+    });
+    try {
+        await controller.toggleDictation(); const first = DrainingRecognition.instances.at(-1);
+        first.emit('first', false); controller.stop(); await controller.toggleDictation();
+        assert.equal(value, 'Draft: First');
+        first.emit('first thought.', true); first.onend(); await tick();
+        const second = DrainingRecognition.instances.at(-1); assert.notEqual(second, first);
+        second.emit('second thought.', true); controller.stop(); second.onend();
+        assert.equal(value, 'Draft: First thought. Second thought.');
+        assert.equal(new Set(ids).size, 2);
+    } finally { controller.stop({ cancelled: true }); }
+});
+
+test('recorded clips finish independently and compose in capture order when responses arrive backwards', async () => recorderEnvironment(async env => {
+    const first = deferred(), second = deferred(); let calls = 0, value = 'Keep this:';
+    env.respond = () => ++calls === 1 ? first.promise : second.promise;
+    const draft = createDictationDraft();
+    const controller = createSpeechInputController({ Recognition: null,
+        onSessionStart({ sessionId }) { draft.begin(sessionId, value); },
+        onFinal(text, event) { value = draft.update(event.sessionId, text, value, event.settled) ?? value; }
+    });
+    try {
+        await controller.toggleDictation(); controller.stop(); await tick();
+        const firstSignal = env.requests[0][1].signal;
+        await controller.toggleDictation(); controller.stop(); await tick();
+        assert.equal(firstSignal.aborted, false); assert.equal(env.requests.length, 2);
+        assert.equal(env.tracks.every(item => item.track.readyState === 'ended'), true);
+        second.resolve(Response.json({ success: true, text: 'Second thought.' })); await tick();
+        assert.equal(value, 'Keep this: Second thought.');
+        first.resolve(Response.json({ success: true, text: 'First thought.' })); await tick();
+        assert.equal(value, 'Keep this: First thought. Second thought.');
+        assert.equal(controller.getState().pendingCount, 0);
+    } finally { controller.stop({ cancelled: true }); }
+}));
+
+test('an older fallback failure cannot stop a newer native recording', async () => recorderEnvironment(async env => {
+    const pending = deferred(), errors = [];
+    env.respond = () => pending.promise;
+    const controller = createSpeechInputController({ Recognition: DrainingRecognition, onError: message => errors.push(message) });
+    try {
+        await controller.toggleDictation(); DrainingRecognition.instances.at(-1).onerror({ error: 'network' }); await tick();
+        controller.stop(); await tick(); await controller.toggleDictation();
+        pending.resolve(Response.json({ success: false, fallbackToBrowser: true }, { status: 503 })); await tick();
+        assert.equal(controller.getState().mode, 'dictation'); assert.equal(controller.getState().listening, true);
+        assert.equal(errors.length, 1);
+    } finally { controller.stop({ cancelled: true }); }
+}));
+
+test('cancellation invalidates all pending clips and a late permission grant without publishing stale text', async () => recorderEnvironment(async env => {
+    const pending = deferred(), permission = deferred(), finals = [];
+    env.respond = () => pending.promise;
+    const controller = createSpeechInputController({ Recognition: null, onFinal: text => finals.push(text) });
+    try {
+        await controller.toggleDictation(); controller.stop(); await tick();
+        const signal = env.requests[0][1].signal;
+        env.getUserMedia = () => permission.promise;
+        const starting = controller.toggleDictation(); controller.stop({ releaseStream: true });
+        const lateStream = stream(); permission.resolve(lateStream); await starting;
+        pending.resolve(Response.json({ success: true, text: 'Stale words.' })); await tick();
+        assert.equal(lateStream.track.readyState, 'ended'); assert.equal(signal.aborted, true);
+        assert.deepEqual(finals, []); assert.equal(controller.getState().pendingCount, 0);
+    } finally { controller.stop({ cancelled: true }); }
+}));
+
+test('assistant processing updates do not clear pending transcription or a recording identity', async () => recorderEnvironment(async env => {
+    const pending = deferred(); env.respond = () => pending.promise;
+    const controller = createSpeechInputController({ Recognition: null });
+    try {
+        await controller.toggleDictation(); controller.stop(); await tick();
+        controller.setProcessing(false);
+        assert.equal(controller.getState().transcribing, true);
+        pending.resolve(Response.json({ success: true, text: 'Completed words.' })); await tick();
+        assert.equal(controller.getState().transcribing, false);
+    } finally { controller.stop({ cancelled: true }); }
+}));
+
+test('Send finishes capture and waits for transcription, with duplicate clicks coalesced', async () => recorderEnvironment(async env => {
+    const pending = deferred(), finals = []; env.respond = () => pending.promise;
+    const controller = createSpeechInputController({ Recognition: null, onFinal: text => finals.push(text) });
+    try {
+        await controller.toggleDictation(); const sending = controller.prepareSubmit(); await tick();
+        assert.equal(controller.getState().listening, false);
+        assert.equal(controller.getState().submissionPending, true);
+        assert.equal(await controller.prepareSubmit(), false);
+        pending.resolve(Response.json({ success: true, text: 'Complete this thought.' }));
+        assert.equal(await sending, true); assert.deepEqual(finals, ['Complete this thought.']);
+        assert.equal(controller.getState().submissionPending, false);
+    } finally { controller.stop({ cancelled: true }); }
+}));
+
+test('editing or starting another recording cancels the queued Send without cancelling unrelated finished text', async () => recorderEnvironment(async env => {
+    const pending = deferred(); env.respond = () => pending.promise;
+    const controller = createSpeechInputController({ Recognition: null });
+    try {
+        await controller.toggleDictation(); const sending = controller.prepareSubmit(); await tick();
+        await controller.toggleDictation();
+        pending.resolve(Response.json({ success: true, text: 'First recording.' }));
+        assert.equal(await sending, false); assert.equal(controller.getState().listening, true);
+        const secondSend = controller.prepareSubmit(); controller.stop({ cancelled: true });
+        assert.equal(await secondSend, false);
+    } finally { controller.stop({ cancelled: true }); }
+}));
+
+test('a transcription timeout cancels queued Send and releases all capture resources', async () => recorderEnvironment(async env => {
+    env.respond = (_url, init) => new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+    });
+    const errors = [], controller = createSpeechInputController({ Recognition: null, transcriptionTimeoutMs: 20, onError: message => errors.push(message) });
+    try {
+        await controller.toggleDictation();
+        const sending = controller.prepareSubmit();
+        // Keep a timer alive because AbortSignal.timeout uses an unreferenced timer in Node.
+        await new Promise(resolve => setTimeout(resolve, 50));
+        assert.equal(await sending, false); assert.match(errors[0], /timed out/);
+        assert.equal(controller.getState().pendingCount, 0);
+        assert.equal(env.tracks.every(item => item.track.readyState === 'ended'), true);
+    } finally { controller.stop({ cancelled: true }); }
+}));
